@@ -50,7 +50,8 @@ async fn main() {
             current_scenario = match current_scenario {
                 TestScenario::Manual => TestScenario::CirculoPerfecto,
                 TestScenario::CirculoPerfecto => TestScenario::RejillaCuadrada,
-                TestScenario::RejillaCuadrada => TestScenario::Manual,
+                TestScenario::RejillaCuadrada => TestScenario::PuntosAleatorios8,
+                TestScenario::PuntosAleatorios8 => TestScenario::Manual,
             };
             nodes = generate_scenario(current_scenario, screen_width(), screen_height());
             current_path.clear();

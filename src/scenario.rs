@@ -6,6 +6,7 @@ pub enum TestScenario {
     Manual,
     CirculoPerfecto,
     RejillaCuadrada,
+    PuntosAleatorios8,
 }
 
 impl TestScenario {
@@ -14,6 +15,7 @@ impl TestScenario {
             TestScenario::Manual => "Manual (Click en pantalla)",
             TestScenario::CirculoPerfecto => "Test: Círculo Perfecto (Óptimo obvio)",
             TestScenario::RejillaCuadrada => "Test: Rejilla 4x4 (Óptimo simétrico)",
+            TestScenario::PuntosAleatorios8 => "Test: Aleatorios 8 pts (Trampa Local)",
         }
     }
 }
@@ -34,6 +36,20 @@ pub fn generate_scenario(
         }
         TestScenario::RejillaCuadrada => {
             nodes = generate_grid(cx, cy, 4, 4, 100.0);
+        }
+        TestScenario::PuntosAleatorios8 => {
+            // Escalar y centrar los puntos del benchmark
+            let s = 15.0; // scale
+            nodes = vec![
+                Node::new(cx + 0.0 * s, cy + 0.0 * s),
+                Node::new(cx + 10.0 * s, cy + 5.0 * s),
+                Node::new(cx + 20.0 * s, cy + 0.0 * s),
+                Node::new(cx + 15.0 * s, cy + 15.0 * s),
+                Node::new(cx + 5.0 * s, cy + 15.0 * s),
+                Node::new(cx + -5.0 * s, cy + 10.0 * s),
+                Node::new(cx + -10.0 * s, cy + 0.0 * s),
+                Node::new(cx + -5.0 * s, cy + -5.0 * s),
+            ];
         }
     }
     nodes
@@ -90,6 +106,10 @@ mod tests {
         assert_eq!(
             TestScenario::RejillaCuadrada.name(),
             "Test: Rejilla 4x4 (Óptimo simétrico)"
+        );
+        assert_eq!(
+            TestScenario::PuntosAleatorios8.name(),
+            "Test: Aleatorios 8 pts (Trampa Local)"
         );
     }
 

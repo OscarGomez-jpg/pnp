@@ -5,6 +5,9 @@
 pub mod nearest_neighbor;
 pub mod triangle_insertion;
 pub mod triangle_insertion_v2;
+pub mod triangle_insertion_v3;
+pub mod triangle_insertion_v4;
+pub mod triangle_insertion_v5;
 
 use crate::core::Node;
 use std::collections::HashMap;
@@ -90,6 +93,27 @@ pub fn create_registry() -> StrategyRegistry {
         factory: || Box::new(triangle_insertion_v2::TriangleInsertionV2::new()),
     });
 
+    // Registrar Triangle Insertion V3 — Cheapest Insertion + Convex Hull
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v3".to_string(),
+        name: "Triangle Insertion V3 (Convex Hull + Cheapest)".to_string(),
+        factory: || Box::new(triangle_insertion_v3::TriangleInsertionV3::new()),
+    });
+
+    // Registrar Triangle Insertion V4 — Triangle Rotation
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v4".to_string(),
+        name: "Triangle Insertion V4 (Look-Ahead Rotation)".to_string(),
+        factory: || Box::new(triangle_insertion_v4::TriangleInsertionV4::new()),
+    });
+
+    // Registrar Triangle Insertion V5 — Exact Branch & Bound
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v5".to_string(),
+        name: "Triangle Insertion V5 (Root Backtracking B&B)".to_string(),
+        factory: || Box::new(triangle_insertion_v5::TriangleInsertionV5::new()),
+    });
+
     registry
 }
 
@@ -116,6 +140,6 @@ mod tests {
     fn test_list_names() {
         let registry = create_registry();
         let names = registry.list_names();
-        assert_eq!(names.len(), 3);
+        assert_eq!(names.len(), 6);
     }
 }

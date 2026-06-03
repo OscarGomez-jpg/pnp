@@ -79,7 +79,7 @@ fn test_both_strategies_complete_circle_scenario() {
         let mut path = vec![];
         let mut finished = false;
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             finished = strategy.execute_step(&mut path, &nodes);
             if finished {
                 break;
@@ -111,7 +111,7 @@ fn test_both_strategies_complete_grid_scenario() {
         let mut path = vec![];
         let mut finished = false;
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             finished = strategy.execute_step(&mut path, &nodes);
             if finished {
                 break;

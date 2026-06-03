@@ -156,8 +156,8 @@ pub fn create_benchmark_suite() -> Vec<BenchmarkProblem> {
             Node::new(-10.0, 0.0),
             Node::new(-5.0, -5.0),
         ],
-        71.8, // Aproximado
-        vec![0, 2, 3, 4, 1, 5, 6, 7],
+        84.67488, // Óptimo matemático exacto
+        vec![0, 1, 2, 3, 4, 5, 6, 7],
     ));
 
     suite
