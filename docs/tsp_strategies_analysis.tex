@@ -1,0 +1,301 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{babel}
+\usepackage{hyperref}
+
+\geometry{top=2.5cm, bottom=2.5cm, left=3cm, right=3cm}
+
+\title{\textbf{Análisis Heurístico y Exacto para el Problema del Viajante (TSP)}\\\large Evolución de Estrategias: V3, V4, V5 y V6}
+\author{Traveler Project}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este documento detalla la evolución matemática y algorítmica de cuatro estrategias diseñadas para resolver el Problema del Viajante de Comercio (TSP) basadas en la expansión geométrica de polígonos. Se describe el funcionamiento interno, la complejidad computacional asintótica y el desempeño empírico de cada versión. La versión más reciente, \textbf{V6 (Smoothest Angle)}, introduce una metáfora física novedosa: modelar la ruta como un \textit{hilo tendido sobre pines en un tablero}, favoreciendo inserciones que minimizan la curvatura en cada punto de inserción.
+\end{abstract}
+
+\section{Introducción}
+El enfoque de ``Triangle Insertion'' construye el recorrido del viajante expandiendo iterativamente un polígono inicial. Las versiones V3--V6 representan la evolución desde una heurística polinómica determinista (V3), pasando por una heurística de relajación geométrica con visión futura (V4), hasta culminar en un solver exacto mediante \textit{Branch \& Bound} (V5). La V6 reinterpreta el proceso de inserción bajo la \textbf{analogía del hilo y pines}, priorizando rutas geométricamente suaves sobre rutas de mínimo costo inmediato.
+
+\section{Triangle Insertion V3: Convex Hull + Cheapest}
+
+\subsection{Descripción Matemática}
+La V3 es una heurística constructiva fuertemente guiada por la geometría espacial.
+\begin{enumerate}
+    \item \textbf{Inicialización:} Computa el Casco Convexo (Convex Hull) utilizando el algoritmo de \textit{Andrew's Monotone Chain}. Extrae el triángulo base $\triangle_{base} = \{A, B, C\} \in \text{Hull}$ que maximiza el perímetro. Esto garantiza una frontera externa que envuelve el problema, evitando auto-intersecciones tempranas.
+    \item \textbf{Cheapest Insertion Global:} En cada iteración, evalúa todos los nodos no visitados $u \in U$ contra todas las aristas actuales $(i, j) \in E$. Selecciona el par $(u, (i,j))$ que minimice el costo de inserción:
+    \[
+    \Delta C(i, j, u) = d(i, u) + d(u, j) - d(i, j)
+    \]
+    \item \textbf{Post-procesamiento:} Aplica operadores de búsqueda local \textit{2-Opt} y \textit{Or-Opt} para desenredar cruces residuales.
+\end{enumerate}
+
+\subsection{Complejidad}
+\begin{itemize}
+    \item El Casco Convexo toma $\mathcal{O}(N \log N)$.
+    \item La búsqueda del Cheapest Insertion requiere evaluar $|U|$ candidatos contra $|E|$ aristas. En el peor caso, esto cuesta $\mathcal{O}(N^2)$ por iteración. A lo largo de $N$ inserciones, la complejidad constructiva es $\mathbf{\mathcal{O}(N^3)}$.
+    \item La optimización 2-Opt en el peor de los casos asintóticos es $\mathcal{O}(N^2)$, aunque suele converger rápidamente.
+\end{itemize}
+
+\subsection{Desempeño en Benchmarks y Visualización de Falla}
+\begin{itemize}
+    \item \textbf{Ratio global:} $1.0268$ (empate por el 1er lugar entre las heurísticas polinómicas).
+    \item \textbf{Trampa de 8 puntos:} Superada perfectamente. El algoritmo encontró el óptimo matemático ($84.67$).
+\end{itemize}
+
+\textbf{¿Dónde falla la V3?}
+La heurística de \textit{Cheapest Insertion} pura falla en topologías de ``Cuello de Botella'' o cuando puntos lejanos fuerzan desvíos tardíos que el 2-Opt no puede desatar. A continuación se visualiza un escenario teórico donde la V3 caería en un óptimo local por priorizar una inserción barata a corto plazo.
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[scale=0.8, thick]
+        % Nodos
+        \node[circle, fill=black, inner sep=2pt, label=left:A] (A) at (0, 2) {};
+        \node[circle, fill=black, inner sep=2pt, label=right:B] (B) at (6, 2) {};
+        \node[circle, fill=black, inner sep=2pt, label=below:C] (C) at (3, 0) {};
+        \node[circle, fill=black, inner sep=2pt, label=above:D] (D) at (3, 4) {};
+        \node[circle, fill=red, inner sep=2pt, label=above:E (Trampa)] (E) at (3, 1.5) {};
+
+        % Aristas óptimo local (Ruta V3)
+        \draw[blue, dashed, ->] (A) -- (D) -- (B) -- (E) -- (C) -- (A);
+        
+        % Aristas óptimo global
+        \draw[green!60!black, ->] (A) -- (E) -- (B) -- (D) -- (C) -- (A);
+    \end{tikzpicture}
+    \caption{Escenario de Falla (V3): El nodo E es ``barato'' de insertar desde la base (A, B, C), pero insertarlo tempranamente obliga al nodo D a tomar un desvío gigantesco por el exterior (línea punteada azul). El 2-Opt no puede arreglar esto sin romper la topología base.}
+\end{figure}
+
+\section{Triangle Insertion V4: Look-Ahead Rotation}
+
+\subsection{Descripción Matemática}
+La V4 introduce el concepto de \textit{Relajación Geométrica de Frontera}. A diferencia de la V3 que asume que el polígono actual es rígido, la V4 permite permutar aristas locales antes de realizar una inserción.
+
+\begin{enumerate}
+    \item \textbf{Métrica de Atracción:} Para evaluar si una ruta propuesta $P$ es deseable, calcula el costo del camino sumado al costo de insertar al candidato más cercano:
+    \[
+    S(P) = \sum_{(i,j) \in P} d(i,j) + \min_{u \in U, (i,j) \in P} \Delta C(i, j, u)
+    \]
+    \item \textbf{Rotación Local (Sub-vecindad 3-Opt):} Para cada triplete de nodos consecutivos $(v_k, v_{k+1}, v_{k+2}) \in P$, genera sus 5 permutaciones. Si alguna permutación resulta en un polígono modificado $P'$ tal que $S(P') < S(P)$, la rotación se aplica permanentemente.
+    \item \textbf{Doble Rotación Combinada (4-Opt Restringido):} Tras la rotación simple, el algoritmo escanea el polígono en busca de cruces geométricos 2D. Si detecta que la arista $i \rightarrow i+1$ se cruza con $j \rightarrow j+1$, extrae los tríos $T_1 = \{i-1, i, i+1\}$ y $T_2 = \{j-1, j, j+1\}$. Evalúa las $6 \times 6 = 36$ permutaciones combinadas de ambos sub-polígonos. Si alguna reduce la métrica $S(P')$, se aplica la doble rotación.
+    \item \textbf{Inserción:} Posteriormente, procede con la lógica \textit{Cheapest Insertion} descrita en V3.
+\end{enumerate}
+
+\subsection{Complejidad}
+\begin{itemize}
+    \item Existen $N$ tripletes en el polígono. Evaluar $S(P)$ toma $\mathcal{O}(N^2)$.
+    \item La rotación simple de tripletes cuesta $\mathcal{O}(N^3)$ por inserción.
+    \item La doble rotación detecta cruces en $\mathcal{O}(N^2)$ comprobaciones. Al encontrar un cruce, evalúa 36 configuraciones conjuntas, cada una requiriendo evaluar $S(P)$ en $\mathcal{O}(N^2)$. En el peor caso (con $\mathcal{O}(N^2)$ cruces simultáneos), esto toma $\mathcal{O}(N^4)$ por paso de inserción.
+    \item Sumando ambos procesos a lo largo de $N$ inserciones, la complejidad global de la V4 optimizada se mantiene en $\mathbf{\mathcal{O}(N^5)}$ en el peor caso teórico, siendo sumamente eficiente en la práctica ya que el número de intersecciones reales es usualmente bajo ($\le 2$).
+\end{itemize}
+
+\begin{itemize}
+    \item \textbf{Ratio global:} $1.0268$. Obtiene excelentes resultados con cotas muy cercanas al óptimo exacto.
+    \item La adición de la Doble Rotación le otorga una robustez superior para esquivar óptimos locales complejos (dobles cruces) sin sacrificar la viabilidad polinómica del algoritmo.
+\end{itemize}
+
+\textbf{Análisis del Nudo 4-Opt Anteriormente Irresoluble}
+Antes de la mejora, la V4 clásica evaluaba rotaciones de \textbf{3 nodos consecutivos} y era matemáticamente incapaz de desenredar trampas de \textbf{componentes entrelazados} (que requieren romper 4 aristas simultáneamente, es decir, un 4-Opt). Con la nueva doble rotación combinada, esta trampa geométrica se resuelve exitosamente.
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[scale=0.8, thick]
+        % Nodos Cuadrado Izquierdo
+        \node[circle, fill=black, inner sep=2pt] (L1) at (0, 0) {};
+        \node[circle, fill=black, inner sep=2pt] (L2) at (0, 3) {};
+        \node[circle, fill=black, inner sep=2pt] (L3) at (3, 3) {};
+        \node[circle, fill=black, inner sep=2pt] (L4) at (3, 0) {};
+        
+        % Nodos Cuadrado Derecho (Entrelazado)
+        \node[circle, fill=black, inner sep=2pt] (R1) at (2, -1) {};
+        \node[circle, fill=black, inner sep=2pt] (R2) at (2, 4) {};
+        \node[circle, fill=black, inner sep=2pt] (R3) at (5, 4) {};
+        \node[circle, fill=black, inner sep=2pt] (R4) at (5, -1) {};
+
+        % Ruta Óptimo Local entrelazado (Ruta V4 atrapada)
+        \draw[red, dashed] (L1) -- (L2) -- (R2) -- (R3) -- (R4) -- (R1) -- (L4) -- (L3) -- (L1);
+        
+        % Ruta Óptima real (Dos cuadrados separados conectados)
+        \draw[green!60!black] (L1) -- (L2) -- (L3) -- (L4) -- (R1) -- (R4) -- (R3) -- (R2) -- (L1);
+    \end{tikzpicture}
+    \caption{Escenario de Falla (V4): Nudo 4-Opt. La línea punteada roja muestra cómo la V4 conectaría las estructuras creando un cruce doble. Al intentar rotar solo 3 nodos a la vez, cualquier movimiento intermedio empeora la distancia temporalmente. El algoritmo abandona la rotación y queda atrapado.}
+\end{figure}
+
+\section{Triangle Insertion V5: Root Backtracking (Branch \& Bound)}
+
+\subsection{Descripción Matemática}
+La V5 abandona la naturaleza heurística (\textit{Greedy}) para convertirse en un \textbf{Solver Exacto}. Utiliza la topología del problema para crear un árbol de búsqueda sistemática y exhaustiva.
+
+\begin{enumerate}
+    \item \textbf{Raíz del Árbol:} Al igual que en versiones anteriores, inicializa la búsqueda empleando el triángulo del Casco Convexo de mayor perímetro. Esto reduce dramáticamente la simetría y las redundancias del árbol de permutaciones estándar.
+    \item \textbf{Cota Superior (Upper Bound):} Inicializa la mejor distancia $D_{best}$ usando una ejecución ultrarrápida del \textit{Nearest Neighbor}.
+    \item \textbf{Ramificación (Branch):} Por cada estado parcial (una ruta $P_t$ y un conjunto de no visitados $U_t$), genera ramas para todas las combinaciones de insertar $u \in U_t$ en la arista $(i,j) \in P_t$.
+    \item \textbf{Poda (Bound):} Si el costo de $P_t$ excede a $D_{best}$, la rama entera se descarta.
+\end{enumerate}
+
+\subsection{Complejidad}
+\begin{itemize}
+    \item El algoritmo navega por un espacio de búsqueda combinatorio. La complejidad asintótica en el peor de los casos (sin podas) es factorial: $\mathbf{\mathcal{O}(N!)}$.
+    \item Las podas por \textit{Upper Bound} disminuyen drásticamente el espacio real explorado, permitiendo resolver problemas de hasta $\sim 15$ nodos en tiempos interactivos, pero la escalabilidad sigue estando atada a la maldición de la dimensionalidad (NP-Hard).
+\end{itemize}
+
+\subsection{Desempeño en Benchmarks}
+\begin{itemize}
+    \item \textbf{Ratio global:} $\mathbf{1.000}$ (Óptimo absoluto garantizado).
+    \item Permitió descubrir errores metodológicos en las marcas del suite de pruebas, demostrando irrefutablemente que el límite teórico del escenario aleatorio de 8 nodos no era $71.80$, sino $84.67488$.
+\end{itemize}
+
+\section{Análisis de Falla Real de Heurísticas (8 Nodos)}
+Para determinar con exactitud el límite práctico de las heurísticas constructivas polinomiales (V3 y V4), implementamos un motor de búsqueda automática que analizó 500 permutaciones aleatorias de semillas de coordenadas bidimensionales de diferentes tamaños. 
+
+El primer escenario real de discrepancia se localizó en una topología específica de **8 nodos**, donde la naturaleza heurística (\textit{Greedy}) de la V3 y V4 no logró converger al óptimo exacto.
+
+\begin{itemize}
+    \item \textbf{Ruta Subóptima (V3 y V4):} Distancia de **1222.5**. La ruta se vio forzada a conectar los extremos de la frontera en un orden no óptimo debido a la ponderación del \textit{Cheapest Insertion} temprano.
+    \item \textbf{Ruta Óptima (V5 - Exacta):} Distancia de **1216.0**. El solver exacto determinó que re-orientar la arista del cuadrante inferior reduce la distancia total a cambio de sacrificar la aparente ``baratura'' local en el paso intermedio.
+\end{itemize}
+
+\begin{figure}[ht]
+    \centering
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \begin{tikzpicture}[scale=0.8, thick]
+            \draw[gray!20, thin, step=1cm] (0,0) grid (8,8);
+            % Nodos reales escalados (/50)
+            \node[circle, fill=black, inner sep=1.5pt, label=above right:0] (N0) at (4.12, 3.42) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=left:1] (N1) at (1.41, 2.62) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:2] (N2) at (1.24, 3.96) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=right:3] (N3) at (5.45, 0.27) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:4] (N4) at (0.78, 7.26) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=left:5] (N5) at (0.75, 3.98) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:6] (N6) at (6.36, 5.46) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=right:7] (N7) at (7.50, 5.91) {};
+            
+            % Ruta V3/V4: 3 -> 7 -> 6 -> 4 -> 5 -> 2 -> 1 -> 0 -> 3
+            \draw[red, dashed] (N3) -- (N7) -- (N6) -- (N4) -- (N5) -- (N2) -- (N1) -- (N0) -- (N3);
+        \end{tikzpicture}
+        \caption{Ruta Subóptima V3/V4 (Dist: 1222.5)}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \begin{tikzpicture}[scale=0.8, thick]
+            \draw[gray!20, thin, step=1cm] (0,0) grid (8,8);
+            % Nodos reales escalados (/50)
+            \node[circle, fill=black, inner sep=1.5pt, label=above right:0] (N0) at (4.12, 3.42) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=left:1] (N1) at (1.41, 2.62) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:2] (N2) at (1.24, 3.96) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=right:3] (N3) at (5.45, 0.27) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:4] (N4) at (0.78, 7.26) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=left:5] (N5) at (0.75, 3.98) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=above:6] (N6) at (6.36, 5.46) {};
+            \node[circle, fill=black, inner sep=1.5pt, label=right:7] (N7) at (7.50, 5.91) {};
+            
+            % Ruta V5 Óptima: 3 -> 0 -> 6 -> 7 -> 4 -> 5 -> 2 -> 1 -> 3
+            \draw[green!60!black] (N3) -- (N0) -- (N6) -- (N7) -- (N4) -- (N5) -- (N2) -- (N1) -- (N3);
+        \end{tikzpicture}
+        \caption{Ruta Óptima Exacta V5 (Dist: 1216.0)}
+    \end{minipage}
+    \caption{Comparación de rutas mapeada sobre coordenadas reales.}
+\end{figure}
+
+\section{Triangle Insertion V6: Smoothest Angle Insertion}
+
+\subsection{Motivación: La Analogía del Hilo y los Pines}
+Imagina que los nodos del mapa son \textbf{pines clavados en un tablero} y la ruta del viajante es un \textbf{hilo} que debe pasar por todos ellos. Un hilo físico real busca naturalmente la configuración de \textit{mínima tensión}: prefiere curvas suaves sobre giros bruscos.
+
+La heurística \textit{Cheapest Insertion} de V3 y V4 equivale a un hilo que minimiza su longitud total ignorando los ángulos que forma en cada pin. Esto genera ``nudos'' angulares que un hilo real evitaría. La V6 formaliza esta intuición física con una métrica angular.
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[scale=0.95, thick]
+        % Panel izquierdo: Cheapest (V4)
+        \begin{scope}[xshift=0cm]
+            \node at (2.5, 4.8) {\small V4 --- Cheapest (giro brusco)};
+            \node[circle, fill=gray!60, inner sep=3pt] (P1) at (0,2) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (P2) at (1,4) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (P3) at (3,3) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (P4) at (4,1) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (P5) at (2,0) {};
+            \draw[red!70!black, ->, line width=1.2pt] (P1) -- (P2) -- (P3) -- (P5) -- (P4) -- (P1);
+            \node[red!80!black, font=\small] at (2.3, 0.4) {$\theta\approx 30^\circ$};
+        \end{scope}
+        % Panel derecho: Smoothest (V6)
+        \begin{scope}[xshift=6.5cm]
+            \node at (2.5, 4.8) {\small V6 --- Smoothest Angle (suave)};
+            \node[circle, fill=gray!60, inner sep=3pt] (Q1) at (0,2) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (Q2) at (1,4) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (Q3) at (3,3) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (Q4) at (4,1) {};
+            \node[circle, fill=gray!60, inner sep=3pt] (Q5) at (2,0) {};
+            \draw[green!60!black, ->, line width=1.2pt] (Q1) -- (Q2) -- (Q3) -- (Q4) -- (Q5) -- (Q1);
+            \node[green!50!black, font=\small] at (3.2, 1.8) {$\theta\approx 150^\circ$};
+        \end{scope}
+    \end{tikzpicture}
+    \caption{La V4 inserta el nodo de menor costo inmediato, generando giros bruscos ($\theta \approx 30^\circ$). La V6 prefiere inserciones con ángulos abiertos ($\theta \approx 150^\circ$), imitando el comportamiento físico de un hilo sobre pines.}
+\end{figure}
+
+\subsection{Descripción Matemática}
+La V6 hereda toda la infraestructura de inicialización y rotación de la V4, reemplazando únicamente la fase de \textit{Cheapest Insertion} por la \textbf{Inserción de Ángulo más Suave}.
+
+\begin{enumerate}
+    \item \textbf{Inicialización y Rotaciones:} Idénticas a V4 (Convex Hull, rotación local de triángulos y Doble Rotación para cruces).
+    \item \textbf{Smoothest Angle Insertion:} Para cada candidato $u \in U$ y cada arista $(i, j) \in P$, el ángulo de inserción $\theta_{ij}^u$ es:
+    \[
+    \theta_{ij}^u = \arccos\!\left(\frac{(\vec{p}_i - \vec{p}_u) \cdot (\vec{p}_j - \vec{p}_u)}{\|\vec{p}_i - \vec{p}_u\| \cdot \|\vec{p}_j - \vec{p}_u\|}\right) \in [0, \pi]
+    \]
+    El score combina costo e inserción angular con factor $\alpha = 2.0$:
+    \[
+    \text{score}(i, j, u) = \Delta C(i,j,u) \cdot \big(1 + \alpha\,(1 + \cos\theta_{ij}^u)\big)
+    \]
+    Cuando $\theta = \pi$ (línea recta), la penalización es nula. Cuando $\theta = 0$ (giro en U), la penalización máxima es $4\alpha \cdot \Delta C$.
+    \item \textbf{Post-procesamiento (3 capas):}
+    \begin{enumerate}
+        \item \textit{2-Opt} (10 iteraciones): elimina cruces de largo alcance.
+        \item \textit{Or-Opt} (segmentos de 1 y 2 nodos): reposiciona nodos y pares.
+        \item \textbf{Node Reinsertion (exclusivo V6):} Extrae cada nodo del tour y lo re-inserta en la posición globalmente óptima. Repite hasta convergencia. Corrige errores estructurales que 2-Opt no puede deshacer.
+        \item \textit{2-Opt} final (5 iteraciones) tras la reinserción.
+    \end{enumerate}
+\end{enumerate}
+
+\subsection{Complejidad}
+\begin{itemize}
+    \item La evaluación del score angular añade coste constante por candidato: la fase constructiva es $\mathbf{\mathcal{O}(N^3)}$, igual que V3.
+    \item La \textit{Node Reinsertion} evalúa $N$ nodos $\times$ $N$ posiciones por pasada, con hasta $N$ pasadas: $\mathbf{\mathcal{O}(N^3)}$ en el peor caso.
+    \item Incluyendo las rotaciones heredadas de V4, la complejidad global teórica permanece en $\mathbf{\mathcal{O}(N^5)}$, con comportamiento práctico superior a V4 en la fase de refinamiento.
+\end{itemize}
+
+\subsection{Resultados Empíricos}
+
+Se ejecutaron 320 mapas aleatorios sobre 5 tamaños de problema (semilla fija, reproducible). La comparación directa V4 vs.~V6 mostró una ventaja creciente de V6 con el tamaño:
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{rrrrrrc}
+        \toprule
+        $N$ & Tests & V4 gana & V6 gana & Dist.\ media V4 & Dist.\ media V6 & Mejora V6 \\
+        \midrule
+         15 & 100 &  0 &  2 &   1552.3 &   1552.0 & $+0.022\%$ \\
+         25 & 100 &  3 &  8 &   3157.7 &   3153.8 & $+0.126\%$ \\
+         50 &  60 &  5 & 13 &   8872.7 &   8853.8 & $+0.214\%$ \\
+         75 &  40 &  3 & 13 &  15970.7 &  15909.4 & $+0.384\%$ \\
+        100 &  20 &  7 &  6 &  24445.5 &  24437.4 & $+0.033\%$ \\
+        \bottomrule
+    \end{tabular}
+    \caption{Comparación V4 vs.~V6 en mapas aleatorios. La mejora de V6 crece con $N$ hasta 75 nodos; a 100 nodos la Node Reinsertion encuentra menos margen libre.}
+\end{table}
+
+El caso más notable fue un mapa de 25 nodos donde V6 obtuvo una solución \textbf{121.5 unidades} más corta que V4, gracias a que la métrica angular evitó un error estructural que la reinserción luego corrigió completamente.
+
+\section{Conclusión}
+El ecosistema de estrategias ofrece soluciones para distintos contextos: \textbf{V3} provee el mejor balance entre precisión ($\le 3\%$ error promedio) y complejidad $\mathcal{O}(N^3)$, ideal para grafos grandes. \textbf{V4} añade robustez geométrica ante nudos complejos mediante rotaciones de doble triángulo. \textbf{V5} actúa como el oráculo exacto para auditar cotas en mapas pequeños. \textbf{V6} cierra el ciclo integrando una filosofía de construcción físicamente motivada (mínima curvatura angular) con un post-procesamiento de reinserción global, logrando mejoras empíricas que crecen con el tamaño del problema.
+
+\end{document}

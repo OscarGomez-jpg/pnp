@@ -1,3 +1,4 @@
+pub mod christofides;
 /// Sistema declarativo de estrategias para TSP
 ///
 /// Permite registrar y ejecutar estrategias de forma consistente,
@@ -8,6 +9,7 @@ pub mod triangle_insertion_v2;
 pub mod triangle_insertion_v3;
 pub mod triangle_insertion_v4;
 pub mod triangle_insertion_v5;
+pub mod triangle_insertion_v6;
 
 use crate::core::Node;
 use std::collections::HashMap;
@@ -114,6 +116,19 @@ pub fn create_registry() -> StrategyRegistry {
         factory: || Box::new(triangle_insertion_v5::TriangleInsertionV5::new()),
     });
 
+    // Registrar Triangle Insertion V6 — Smoothest Angle
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v6".to_string(),
+        name: "Triangle Insertion V6 (Smoothest Angle)".to_string(),
+        factory: || Box::new(triangle_insertion_v6::TriangleInsertionV6::new()),
+    });
+
+    registry.register(StrategyDescriptor {
+        id: "christofides".to_string(),
+        name: "christofides heuristic (O(N3))".to_string(),
+        factory: || Box::new(christofides::ChristofidesStrategy::new()),
+    });
+
     registry
 }
 
@@ -140,6 +155,6 @@ mod tests {
     fn test_list_names() {
         let registry = create_registry();
         let names = registry.list_names();
-        assert_eq!(names.len(), 6);
+        assert_eq!(names.len(), 7);
     }
 }
