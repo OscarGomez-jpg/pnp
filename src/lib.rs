@@ -4,4 +4,5 @@ pub mod benchmarks;
 pub mod core;
 pub mod scenario;
 pub mod strategies;
+pub mod tsplib;
 pub mod ui;
