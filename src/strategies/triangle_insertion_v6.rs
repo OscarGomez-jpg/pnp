@@ -15,6 +15,7 @@
 ///   - Cuando θ ≈ 0° (giro brusco):  cos θ ≈ +1, penalización = 2α * cost
 use super::Strategy;
 use crate::core::{Node, insertion_cost, path_distance};
+use macroquad::prelude::Vec2;
 
 pub struct TriangleInsertionV6 {
     initialized: bool,
@@ -277,10 +278,9 @@ impl TriangleInsertionV6 {
         let p3 = nodes[b1].pos;
         let p4 = nodes[b2].pos;
 
-        let cross = |p: macroquad::math::Vec2,
-                     q: macroquad::math::Vec2,
-                     r: macroquad::math::Vec2|
-         -> f32 { (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y) };
+        let cross = |p: Vec2, q: Vec2, r: Vec2| -> f32 {
+            (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+        };
 
         let o1 = cross(p1, p2, p3);
         let o2 = cross(p1, p2, p4);
@@ -391,44 +391,52 @@ impl TriangleInsertionV6 {
             return false;
         }
 
-        let mut improved = false;
+        let mut improved = true;
 
-        'outer: loop {
+        while improved {
+            improved = false;
             let current_dist = path_distance(path, nodes);
 
             for i in 0..path.len() {
-                if i + seg_len > path.len() {
+                // Extraer el segmento de nodos consecutivos
+                let seg: Vec<usize> = (0..seg_len).map(|k| path[(i + k) % path.len()]).collect();
+
+                // Crear path reducido sin el segmento
+                let mut reduced: Vec<usize> = Vec::new();
+                for k in 0..path.len() {
+                    if k < i || k >= i + seg_len {
+                        reduced.push(path[k]);
+                    }
+                }
+
+                let m = reduced.len();
+                if m < 2 {
                     continue;
                 }
 
-                let seg: Vec<usize> = (0..seg_len).map(|k| path[i + k]).collect();
-                let prev = if i == 0 { path.len() - 1 } else { i - 1 };
-                let next = i + seg_len;
+                for j in 0..=m {
+                    let mut candidate = reduced[..j.min(m)].to_vec();
+                    candidate.extend_from_slice(&seg);
+                    if j < m {
+                        candidate.extend_from_slice(&reduced[j..]);
+                    }
 
-                if next >= path.len() {
-                    continue;
-                }
-
-                let mut new_path: Vec<usize> = path[..i].to_vec();
-                new_path.extend_from_slice(&path[next..]);
-
-                let m = new_path.len();
-                for j in 0..m {
-                    if j == prev.min(m - 1) {
+                    if candidate.len() != path.len() {
                         continue;
                     }
-                    let mut candidate = new_path[..=j].to_vec();
-                    candidate.extend_from_slice(&seg);
-                    candidate.extend_from_slice(&new_path[j + 1..]);
 
-                    if path_distance(&candidate, nodes) < current_dist - 0.01 {
+                    let dist = path_distance(&candidate, nodes);
+                    if dist < current_dist - 0.01 {
                         *path = candidate;
                         improved = true;
-                        continue 'outer;
+                        break;
                     }
                 }
+
+                if improved {
+                    break;
+                }
             }
-            break;
         }
         improved
     }
