@@ -10,6 +10,7 @@ pub mod triangle_insertion_v3;
 pub mod triangle_insertion_v4;
 pub mod triangle_insertion_v5;
 pub mod triangle_insertion_v6;
+pub mod triangle_insertion_v7;
 
 use crate::core::Node;
 use std::collections::HashMap;
@@ -123,6 +124,13 @@ pub fn create_registry() -> StrategyRegistry {
         factory: || Box::new(triangle_insertion_v6::TriangleInsertionV6::new()),
     });
 
+    // Registrar Triangle Insertion V7 — Geo-Accel + Ejection Chains + Simulated Annealing
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v7".to_string(),
+        name: "Triangle Insertion V7 (Geo-Accel + Ejection Chains + SA)".to_string(),
+        factory: || Box::new(triangle_insertion_v7::TriangleInsertionV7::new()),
+    });
+
     registry.register(StrategyDescriptor {
         id: "christofides".to_string(),
         name: "christofides heuristic (O(N3))".to_string(),
@@ -155,6 +163,6 @@ mod tests {
     fn test_list_names() {
         let registry = create_registry();
         let names = registry.list_names();
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 9);
     }
 }
