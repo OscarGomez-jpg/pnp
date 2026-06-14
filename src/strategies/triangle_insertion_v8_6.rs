@@ -186,6 +186,7 @@ pub struct TriangleInsertionV86 {
     initialized: bool,
     unvisited: Vec<usize>,
     params: V86Params,
+    pub use_reversed_hull: bool,
 }
 
 impl TriangleInsertionV86 {
@@ -194,6 +195,7 @@ impl TriangleInsertionV86 {
             initialized: false,
             unvisited: Vec::new(),
             params: V86Params::default(),
+            use_reversed_hull: false,
         }
     }
 
@@ -202,6 +204,7 @@ impl TriangleInsertionV86 {
             initialized: false,
             unvisited: Vec::new(),
             params,
+            use_reversed_hull: false,
         }
     }
 
@@ -680,6 +683,119 @@ impl TriangleInsertionV86 {
 
         ever_improved
     }
+
+    // -------------------------------------------------------------------------
+    // Post-optimización: Segment Rotation (Idea #3 - Local Rotation Detection)
+    // -------------------------------------------------------------------------
+
+    /// Detecta y corrige rotaciones locales de segmentos en el tour.
+    /// Para cada segmento de longitud k (3-8 nodos), prueba todas las rotaciones cíclicas
+    /// y se queda con la que minimice la distancia total.
+    pub fn optimize_segment_rotation(path: &mut Vec<usize>, nodes: &[Node]) -> bool {
+        let n = path.len();
+        if n < 4 {
+            return false;
+        }
+
+        let mut ever_improved = false;
+        let mut improved = true;
+        let mut max_iterations = n * 10; // Límite para evitar loop infinito
+
+        while improved && max_iterations > 0 {
+            improved = false;
+            max_iterations -= 1;
+
+            // Probar segmentos de longitud 3 a 8
+            for seg_len in 3..=8 {
+                if n < seg_len {
+                    continue;
+                }
+
+                for i in 0..n {
+                    // Extraer el segmento
+                    let segment: Vec<usize> = (0..seg_len)
+                        .map(|k| path[(i + k) % n])
+                        .collect();
+
+                    // Obtener los nodos de conexión (antes y después del segmento)
+                    let prev = path[(i + n - 1) % n];
+                    let next = path[(i + seg_len) % n];
+
+                    // Calcular distancia original del segmento
+                    let original_dist = Self::segment_distance_with_connections(
+                        &segment, prev, next, nodes,
+                    );
+
+                    // Probar todas las rotaciones cíclicas
+                    let mut best_rotation = 0;
+                    let mut best_dist = original_dist;
+
+                    for rotation in 1..seg_len {
+                        let rotated: Vec<usize> = (0..seg_len)
+                            .map(|k| segment[(k + rotation) % seg_len])
+                            .collect();
+
+                        let rotated_dist = Self::segment_distance_with_connections(
+                            &rotated, prev, next, nodes,
+                        );
+
+                        if rotated_dist < best_dist - 0.01 {
+                            best_dist = rotated_dist;
+                            best_rotation = rotation;
+                        }
+                    }
+
+                    // Aplicar la mejor rotación si mejora
+                    if best_rotation > 0 {
+                        let rotated: Vec<usize> = (0..seg_len)
+                            .map(|k| segment[(k + best_rotation) % seg_len])
+                            .collect();
+
+                        for k in 0..seg_len {
+                            path[(i + k) % n] = rotated[k];
+                        }
+
+                        improved = true;
+                        ever_improved = true;
+                        break;
+                    }
+                }
+
+                if improved {
+                    break;
+                }
+            }
+        }
+
+        ever_improved
+    }
+
+    /// Calcula la distancia de un segmento incluyendo las conexiones con los nodos prev y next
+    pub fn segment_distance_with_connections(
+        segment: &[usize],
+        prev: usize,
+        next: usize,
+        nodes: &[Node],
+    ) -> f32 {
+        if segment.is_empty() {
+            return 0.0;
+        }
+
+        let mut dist = 0.0;
+
+        // Conexión desde prev al primer nodo del segmento
+        dist += nodes[prev].distance_to(&nodes[segment[0]]);
+
+        // Distancia interna del segmento
+        for i in 0..segment.len() - 1 {
+            dist += nodes[segment[i]].distance_to(&nodes[segment[i + 1]]);
+        }
+
+        // Conexión desde el último nodo del segmento a next
+        dist += nodes[segment[segment.len() - 1]].distance_to(&nodes[next]);
+
+        dist
+    }
 }
 
 // =============================================================================
@@ -698,6 +814,7 @@ impl Strategy for TriangleInsertionV86 {
             Self::optimize_or_opt(current_path, nodes, 2);
             Self::optimize_node_reinsertion(current_path, nodes);
             Self::optimize_bubble_removal(current_path, nodes);
+            Self::optimize_segment_rotation(current_path, nodes);
             Self::optimize_2opt(current_path, nodes, 10);
             Self::optimize_or_opt(current_path, nodes, 1);
             Self::optimize_2opt(current_path, nodes, 5);
@@ -711,7 +828,10 @@ impl Strategy for TriangleInsertionV86 {
                 return true;
             }
 
-            let hull = Self::convex_hull(nodes);
+            let mut hull = Self::convex_hull(nodes);
+            if self.use_reversed_hull {
+                hull.reverse();
+            }
             for &idx in &hull {
                 if let Some(pos) = self.unvisited.iter().position(|&x| x == idx) {
                     self.unvisited.swap_remove(pos);
