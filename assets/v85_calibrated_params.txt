@@ -1,0 +1,6 @@
+# Parámetros calibrados para V8.5
+# Generado automáticamente por grid search
+alpha: 0
+beta: 0
+avg_error: 4.4255357
+instances_tested: 7

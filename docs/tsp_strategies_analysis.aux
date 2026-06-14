@@ -13,26 +13,24 @@
 \@writefile{toc}{\contentsline {section}{\numberline {2}Triangle Insertion V3: Convex Hull + Cheapest}{1}{section.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Descripción Matemática}{1}{subsection.2.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Complejidad}{2}{subsection.2.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Desempeño en Benchmarks y Visualización de Falla}{2}{subsection.2.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Escenario de Falla (V3): El nodo E es ``barato'' de insertar desde la base (A, B, C), pero insertarlo tempranamente obliga al nodo D a tomar un desvío gigantesco por el exterior (línea punteada azul). El 2-Opt no puede arreglar esto sin romper la topología base.}}{2}{figure.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3}Triangle Insertion V4: Look-Ahead Rotation}{3}{section.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Descripción Matemática}{3}{subsection.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Complejidad}{3}{subsection.3.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Escenario de Falla (V4): Nudo 4-Opt. La línea punteada roja muestra cómo la V4 conectaría las estructuras creando un cruce doble. Al intentar rotar solo 3 nodos a la vez, cualquier movimiento intermedio empeora la distancia temporalmente. El algoritmo abandona la rotación y queda atrapado.}}{4}{figure.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Triangle Insertion V5: Root Backtracking (Branch \& Bound)}{4}{section.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Descripción Matemática}{4}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Complejidad}{4}{subsection.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Desempeño en Benchmarks}{5}{subsection.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Análisis de Falla Real de Heurísticas (8 Nodos)}{5}{section.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Triangle Insertion V6: Smoothest Angle Insertion}{5}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Motivación: La Analogía del Hilo y los Pines}{5}{subsection.6.1}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Ruta Subóptima V3/V4 (Dist: 1222.5)}}{6}{figure.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Ruta Óptima Exacta V5 (Dist: 1216.0)}}{6}{figure.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Comparación de rutas mapeada sobre coordenadas reales.}}{6}{figure.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces La V4 inserta el nodo de menor costo inmediato, generando giros bruscos ($\theta \approx 30^\circ $). La V6 prefiere inserciones con ángulos abiertos ($\theta \approx 150^\circ $), imitando el comportamiento físico de un hilo sobre pines.}}{6}{figure.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Descripción Matemática}{6}{subsection.6.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Complejidad}{7}{subsection.6.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Resultados Empíricos}{7}{subsection.6.4}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Comparación V4 vs.~V6 en mapas aleatorios. La mejora de V6 crece con $N$ hasta 75 nodos; a 100 nodos la Node Reinsertion encuentra menos margen libre.}}{7}{table.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusión}{7}{section.7}\protected@file@percent }
-\gdef \@abspage@last{8}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Triangle Insertion V4: Look-Ahead Rotation}{2}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Descripción Matemática}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Triangle Insertion V5: Root Backtracking (Branch \& Bound)}{2}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Descripción Matemática}{2}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Triangle Insertion V6: Smoothest Angle Insertion}{3}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Descripción Matemática}{3}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Triangle Insertion V7: Metaheurística y Aceleración Geométrica}{3}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Innovaciones Tecnológicas}{3}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Optimización de Operadores Locales}{3}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Rendimiento en Benchmarks Reales}{3}{subsection.6.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Comparativa de rendimiento y calidad V6/V7.}}{4}{table.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Triangle Insertion V8: Outside-In Angle Optimization}{4}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Descripción Matemática}{4}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Complejidad}{5}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Ventajas del Enfoque Outside-In}{5}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Rendimiento en Benchmarks Reales (TSPLIB)}{5}{subsection.7.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Comparativa de error porcentual respecto al óptimo conocido.}}{5}{table.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Trade-offs}{5}{subsection.7.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Detalle de mejores resultados por instancia.}}{6}{table.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusión}{6}{section.8}\protected@file@percent }
+\gdef \@abspage@last{6}

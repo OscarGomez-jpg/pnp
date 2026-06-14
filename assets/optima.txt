@@ -1,0 +1,14 @@
+# TSPLIB Optimal/Best Known Solutions
+# Format: instance_name optimal_distance source
+# Sources: Reinelt (TSPLIB), Applegate et al. (Concorde), Helsgaun (LKH)
+berlin52 7542 optimal
+eil51 426 optimal
+st70 675 optimal
+kroA100 21282 optimal
+eil76 538 optimal
+ch130 6110 optimal
+pr76 108159 optimal
+pr107 44303 optimal
+gr120 6942 optimal
+d198 15780 optimal
+att532 27686 best_known
