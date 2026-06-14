@@ -48,6 +48,10 @@ impl Strategy for NearestNeighbor {
     fn reset(&mut self) {
         // Esta estrategia no tiene estado que resetear
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

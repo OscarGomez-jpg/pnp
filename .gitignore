@@ -1,4 +1,3 @@
-```
 # Compiled and build artifacts
 *.o
 *.obj
@@ -7,9 +6,14 @@
 *.so
 *.a
 *.out
+*.rlib
+*.rmeta
+
+# Rust build
+**/target/
+**/Cargo.lock
 
 # Dependencies
-**/target/
 **/node_modules/
 **/venv/
 **/.venv/
@@ -22,14 +26,18 @@
 *.log
 *.tmp
 *.swp
+*.bak
 
 # Editors
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
 
 # System files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Environment
 .env
@@ -64,4 +72,29 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
+# LKH build artifacts (keep only the compiled binary)
+LKH-3.0.14/*.o
+LKH-3.0.14/*.a
+LKH-3.0.14/SRC/*.o
+LKH-3.0.14/SRC/*.a
+
+# Generated visualization files
+*.html
+!docs/*.html
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Training results (generated)
+assets/*_training_results.txt
+
+# Temporary work directories
+/tmp/
+/tmp/*

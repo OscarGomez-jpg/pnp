@@ -300,6 +300,10 @@ impl Strategy for TriangleInsertionV3 {
     fn reset(&mut self) {
         self.initialized = false;
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 // =============================================================================

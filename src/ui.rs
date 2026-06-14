@@ -79,6 +79,13 @@ pub fn render_hud(
     draw_text(
         "[C] Resetear a modo Manual vacio",
         20.0,
+        screen_height() - 40.0,
+        16.0,
+        DARKGRAY,
+    );
+    draw_text(
+        "[X] Exportar solución a TXT",
+        20.0,
         screen_height() - 20.0,
         16.0,
         DARKGRAY,
@@ -137,6 +144,37 @@ pub fn handle_execution_toggle() -> bool {
 /// Detecta reset con [C]
 pub fn handle_reset() -> bool {
     is_key_pressed(KeyCode::C)
+}
+
+/// Detecta exportación con [X]
+pub fn handle_export() -> bool {
+    is_key_pressed(KeyCode::X)
+}
+
+/// Exporta las coordenadas de los nodos a un archivo TXT
+pub fn export_nodes_to_txt(nodes: &[Node], path: &[usize], filename: &str) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut file = File::create(filename)?;
+
+    writeln!(file, "# TSP Solution Export")?;
+    writeln!(file, "# Total nodes: {}", nodes.len())?;
+    writeln!(file, "# Path length: {}", path.len())?;
+    writeln!(file, "")?;
+
+    writeln!(file, "# Node coordinates (index x y)")?;
+    for (idx, node) in nodes.iter().enumerate() {
+        writeln!(file, "{} {:.2} {:.2}", idx, node.pos.x, node.pos.y)?;
+    }
+
+    writeln!(file, "")?;
+    writeln!(file, "# Solution path (node indices in order)")?;
+    for &node_idx in path {
+        writeln!(file, "{}", node_idx)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

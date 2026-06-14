@@ -39,16 +39,18 @@ impl TspInstance {
             }
             
             // Secciones del archivo
-            if line.starts_with("NAME:") {
+            if line.starts_with("NAME") {
                 name = line.split(':').nth(1).unwrap_or("").trim().to_string();
-            } else if line.starts_with("DIMENSION:") {
+            } else if line.starts_with("DIMENSION") {
                 dimension = line.split(':')
                     .nth(1)
                     .and_then(|s| s.trim().parse::<usize>().ok());
-            } else if line.starts_with("OPTIMAL:") {
+            } else if line.starts_with("OPTIMAL") {
                 optimal = line.split(':')
                     .nth(1)
                     .and_then(|s| s.trim().parse::<f32>().ok());
+            } else if line.starts_with("EDGE_WEIGHT_TYPE") {
+                continue;
             } else if line.starts_with("NODE_COORD_SECTION") {
                 in_node_section = true;
             } else if line.starts_with("EOF") {
@@ -130,7 +132,7 @@ mod tests {
     fn test_parse_berlin52() {
         let content = r#"NAME: berlin52
 TYPE: TSP
-DIMENSION: 52
+DIMENSION: 3
 EDGE_WEIGHT_TYPE: EUC_2D
 NODE_COORD_SECTION
 1 565.0 575.0
@@ -141,7 +143,7 @@ EOF
         
         let instance = TspInstance::parse(content).unwrap();
         assert_eq!(instance.name, "berlin52");
-        assert_eq!(instance.dimension, 52);
-        assert_eq!(instance.nodes.len(), 3); // Solo 3 nodos en este ejemplo
+        assert_eq!(instance.dimension, 3);
+        assert_eq!(instance.nodes.len(), 3);
     }
 }

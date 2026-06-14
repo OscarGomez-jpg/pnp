@@ -208,6 +208,10 @@ impl Strategy for TriangleInsertionV2 {
         self.triangle_initialized = false;
         self.last_improvement = 0;
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

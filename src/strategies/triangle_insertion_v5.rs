@@ -271,6 +271,10 @@ impl Strategy for TriangleInsertionV5 {
         self.total_iters = 0;
         self.visual_path.clear();
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 // =============================================================================

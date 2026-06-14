@@ -275,4 +275,8 @@ impl Strategy for ChristofidesStrategy {
     fn reset(&mut self) {
         self.phase = ChristofidesPhase::NotStarted;
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }

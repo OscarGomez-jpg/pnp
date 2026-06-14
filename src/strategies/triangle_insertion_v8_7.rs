@@ -1,8 +1,17 @@
 #![allow(unused)]
-/// Estrategia: Triangle Insertion V7 — Geometric Acceleration + Ejection Chains + Simulated Annealing
+/// Estrategia: Triangle Insertion V8.7 — Onion Peeling (Multi-Layer Convex Hull)
 ///
-/// Versión corregida y optimizada con K-D Tree balanceado O(N log N), Max-Heap de vecinos correcto,
-/// y un motor estocástico real para el Recocido Simulado.
+/// Mejora de V8.6 que usa múltiples capas de convex hull (onion peeling)
+/// para procesar nodos en orden de exterioridad:
+///   - Capa 1: Convex hull exterior
+///   - Capa 2: Convex hull de nodos restantes
+///   - Capa 3: ...
+///   - Última capa: Nodos más interiores
+///
+/// Parámetros configurables:
+///   - k_neighbors: número de vecinos a considerar (4, 6, 8, 10, 12, 16)
+///   - w_angle: peso del ángulo de inserción (0.0 a 1.0)
+///   - w_cost: peso de la penalización por costo (0.0 a 1.0)
 use super::Strategy;
 use crate::core::{Node, insertion_cost, path_distance};
 use macroquad::prelude::Vec2;
@@ -10,7 +19,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 // =============================================================================
-// K-D Tree para Búsqueda de Vecinos Cercanos (Optimizado con Slices)
+// K-D Tree para Búsqueda de Vecinos
 // =============================================================================
 
 #[derive(Clone)]
@@ -62,7 +71,6 @@ impl KDTree {
         let (point, index) = points[mid];
         let mut node = KDNode::new(point, index);
 
-        // Splitting de slices eficiente O(1) sin reasignaciones de memoria
         node.left = Self::build_recursive(&mut points[..mid], depth + 1);
         node.right = Self::build_recursive(&mut points[mid + 1..], depth + 1);
 
@@ -144,8 +152,6 @@ impl PartialOrd for DistanceItem {
     }
 }
 
-// Corregido: El Max-Heap de Rust saca el mayor de la cima.
-// Para el K-NN necesitamos expulsar la distancia MÁXIMA de nuestro set.
 impl Ord for DistanceItem {
     fn cmp(&self, other: &Self) -> Ordering {
         self.dist
@@ -155,59 +161,114 @@ impl Ord for DistanceItem {
 }
 
 // =============================================================================
-// Triangle Insertion V7
+// Parámetros de V8.7
 // =============================================================================
 
-pub struct TriangleInsertionV7 {
-    initialized: bool,
-    iteration: usize,
-    total_iterations: usize,
-    temperature: f32,
-    initial_temperature: f32,
-    cooling_rate: f32,
-    k_neighbors: usize,
-    rng_state: u64, // Generador aleatorio interno autónomo
-    unvisited: Vec<usize>, // Caché de nodos no visitados para evitar O(N)
+#[derive(Clone, Copy)]
+pub struct V87Params {
+    pub k_neighbors: usize,
+    pub w_angle: f32,
+    pub w_cost: f32,
 }
 
-impl TriangleInsertionV7 {
+impl Default for V87Params {
+    fn default() -> Self {
+        Self {
+            k_neighbors: 8,
+            w_angle: 0.25,
+            w_cost: 0.25,
+        }
+    }
+}
+
+// =============================================================================
+// Triangle Insertion V8.7 — Onion Peeling
+// =============================================================================
+
+pub struct TriangleInsertionV87 {
+    initialized: bool,
+    unvisited: Vec<usize>,
+    layers: Vec<Vec<usize>>,
+    current_layer: usize,
+    params: V87Params,
+}
+
+impl TriangleInsertionV87 {
     pub fn new() -> Self {
         Self {
             initialized: false,
-            iteration: 0,
-            total_iterations: 1000,
-            temperature: 10.0,
-            initial_temperature: 10.0,
-            cooling_rate: 0.995,
-            k_neighbors: 15,
-            rng_state: 12345, // Semilla inicial
             unvisited: Vec::new(),
+            layers: Vec::new(),
+            current_layer: 0,
+            params: V87Params::default(),
         }
     }
 
-    // RNG LCG ultra veloz para evitar dependencias externas de crates como `rand`
-    fn next_f32(&mut self) -> f32 {
-        self.rng_state = self
-            .rng_state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1);
-        ((self.rng_state >> 32) as u32) as f32 / (u32::MAX as f32)
+    pub fn with_params(params: V87Params) -> Self {
+        Self {
+            initialized: false,
+            unvisited: Vec::new(),
+            layers: Vec::new(),
+            current_layer: 0,
+            params,
+        }
+    }
+
+    pub fn set_params(&mut self, params: V87Params) {
+        self.params = params;
+    }
+
+    pub fn get_params(&self) -> V87Params {
+        self.params
+    }
+
+    pub fn load_calibrated_params<P: AsRef<std::path::Path>>(&mut self, path: P) -> bool {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let mut k_neighbors = None;
+            let mut w_angle = None;
+            let mut w_cost = None;
+
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some((key, value)) = line.split_once(':') {
+                    match key.trim() {
+                        "k_neighbors" => k_neighbors = value.trim().parse().ok(),
+                        "w_angle" => w_angle = value.trim().parse().ok(),
+                        "w_cost" => w_cost = value.trim().parse().ok(),
+                        _ => {}
+                    }
+                }
+            }
+
+            if let (Some(k), Some(a), Some(c)) = (k_neighbors, w_angle, w_cost) {
+                self.params = V87Params {
+                    k_neighbors: k,
+                    w_angle: a,
+                    w_cost: c,
+                };
+                return true;
+            }
+        }
+        false
     }
 
     // -------------------------------------------------------------------------
-    // Inicialización: Casco Convexo
+    // Convex Hull (Graham Scan)
     // -------------------------------------------------------------------------
 
-    fn convex_hull(nodes: &[Node]) -> Vec<usize> {
-        if nodes.is_empty() {
+    fn convex_hull(nodes: &[Node], indices: &[usize]) -> Vec<usize> {
+        if indices.is_empty() {
             return Vec::new();
         }
-        if nodes.len() < 3 {
-            return (0..nodes.len()).collect();
+        if indices.len() < 3 {
+            return indices.to_vec();
         }
 
-        let mut indexed: Vec<usize> = (0..nodes.len()).collect();
-        indexed.sort_by(|&a, &b| {
+        let mut sorted = indices.to_vec();
+        sorted.sort_by(|&a, &b| {
             let pa = nodes[a].pos;
             let pb = nodes[b].pos;
             pa.x.partial_cmp(&pb.x)
@@ -223,7 +284,7 @@ impl TriangleInsertionV7 {
         };
 
         let mut lower: Vec<usize> = Vec::new();
-        for &idx in &indexed {
+        for &idx in &sorted {
             while lower.len() >= 2
                 && cross(lower[lower.len() - 2], lower[lower.len() - 1], idx) <= 0.0
             {
@@ -233,7 +294,7 @@ impl TriangleInsertionV7 {
         }
 
         let mut upper: Vec<usize> = Vec::new();
-        for &idx in indexed.iter().rev() {
+        for &idx in sorted.iter().rev() {
             while upper.len() >= 2
                 && cross(upper[upper.len() - 2], upper[upper.len() - 1], idx) <= 0.0
             {
@@ -248,169 +309,91 @@ impl TriangleInsertionV7 {
         lower
     }
 
-    fn best_triangle_from_hull(nodes: &[Node]) -> Vec<usize> {
-        let hull = Self::convex_hull(nodes);
-        if hull.len() < 3 {
-            return (0..nodes.len().min(3)).collect();
-        }
+    // -------------------------------------------------------------------------
+    // Onion Peeling: Múltiples capas de convex hull
+    // -------------------------------------------------------------------------
 
-        let n = hull.len();
-        let mut best_triangle = vec![hull[0], hull[1], hull[2]];
-        let mut best_perimeter = Self::triangle_perimeter(hull[0], hull[1], hull[2], nodes);
+    fn compute_onion_layers(nodes: &[Node]) -> Vec<Vec<usize>> {
+        let n = nodes.len();
+        let mut remaining: Vec<usize> = (0..n).collect();
+        let mut layers: Vec<Vec<usize>> = Vec::new();
 
-        for i in 0..n {
-            for j in (i + 1)..n {
-                for k in (j + 1)..n {
-                    let p = Self::triangle_perimeter(hull[i], hull[j], hull[k], nodes);
-                    if p > best_perimeter {
-                        best_perimeter = p;
-                        best_triangle = vec![hull[i], hull[j], hull[k]];
-                    }
-                }
+        while !remaining.is_empty() {
+            let hull = Self::convex_hull(nodes, &remaining);
+            if hull.is_empty() {
+                break;
             }
+
+            // Eliminar nodos del hull de remaining
+            let hull_set: std::collections::HashSet<usize> = hull.iter().copied().collect();
+            remaining.retain(|idx| !hull_set.contains(idx));
+
+            layers.push(hull);
         }
-        best_triangle
-    }
 
-    fn triangle_perimeter(a: usize, b: usize, c: usize, nodes: &[Node]) -> f32 {
-        nodes[a].pos.distance(nodes[b].pos)
-            + nodes[b].pos.distance(nodes[c].pos)
-            + nodes[c].pos.distance(nodes[a].pos)
+        layers
     }
 
     // -------------------------------------------------------------------------
-    // V7 Core: Smoothest Angle Insertion con Aceleración K-D Tree y SA
+    // Scoring de Inserción
     // -------------------------------------------------------------------------
 
-    fn smoothest_insertion_accelerated(
-        &mut self,
+    fn compute_insertion_angle(i: usize, j: usize, u: usize, nodes: &[Node]) -> f32 {
+        let p_i = nodes[i].pos;
+        let p_j = nodes[j].pos;
+        let p_u = nodes[u].pos;
+
+        let v1 = p_i - p_u;
+        let v2 = p_j - p_u;
+
+        let len1 = v1.length();
+        let len2 = v2.length();
+
+        if len1 < 1e-5 || len2 < 1e-5 {
+            return 0.0;
+        }
+
+        let cos_theta = (v1.dot(v2) / (len1 * len2)).clamp(-1.0, 1.0);
+        cos_theta.acos()
+    }
+
+    fn find_best_insertion(
+        &self,
+        candidate: usize,
         path: &[usize],
         nodes: &[Node],
-        kdtree: &KDTree,
-        k: usize,
-        temperature: f32,
-    ) -> (usize, usize) {
-        let alpha: f32 = 2.0;
-        let mut best_node = self.unvisited[0];
+    ) -> (usize, f32) {
         let mut best_pos = 1;
-        let mut best_score = f32::MAX;
+        let mut best_score = f32::MIN;
 
         for i in 0..path.len() {
             let next = (i + 1) % path.len();
-            let edge_mid = (nodes[path[i]].pos + nodes[path[next]].pos) * 0.5;
 
-            // El K-D tree ahora devuelve SOLO vecinos no visitados porque se construyó así
-            let candidates = kdtree.find_k_nearest(edge_mid, k);
+            let insertion_angle = Self::compute_insertion_angle(path[i], path[next], candidate, nodes);
+            let angle_score = insertion_angle / std::f32::consts::PI;
 
-            for &candidate_idx in &candidates {
-                let cost = insertion_cost(path[i], path[next], candidate_idx, nodes);
-                let p_i = nodes[path[i]].pos;
-                let p_next = nodes[path[next]].pos;
-                let p_u = nodes[candidate_idx].pos;
-
-                let v1 = p_i - p_u;
-                let v2 = p_next - p_u;
-                let len1 = v1.length();
-                let len2 = v2.length();
-
-                let cos_theta = if len1 > 1e-5 && len2 > 1e-5 {
-                    (v1.dot(v2) / (len1 * len2)).clamp(-1.0, 1.0)
-                } else {
-                    1.0
-                };
-
-                let base_score = cost * (1.0 + alpha * (1.0 + cos_theta));
-
-                // Recocido simulado legítimo: Perturbación estocástica proporcional a la temperatura
-                let score = base_score * (1.0 + self.next_f32() * temperature * 0.05);
-
-                if score < best_score {
-                    best_score = score;
-                    best_node = candidate_idx;
-                    best_pos = i + 1;
-                }
-            }
-        }
-
-        (best_node, best_pos)
-    }
-
-    // -------------------------------------------------------------------------
-    // Ejection Chains Dinámicas (Corregidas y Optimizadas de O(N²) a O(N))
-    // -------------------------------------------------------------------------
-
-    fn ejection_chain(
-        &mut self,
-        path: &mut Vec<usize>,
-        nodes: &[Node],
-        chain_length: usize,
-        temperature: f32,
-    ) -> bool {
-        if path.len() < chain_length + 2 {
-            return false;
-        }
-
-        let n = path.len();
-        let current_dist = path_distance(path, nodes);
-
-        // Evaluamos un set de puntos de inicio de eyección aleatorios
-        for _ in 0..5 {
-            let start = (self.next_f32() * n as f32) as usize % n;
-            let ejected: Vec<usize> = (0..chain_length).map(|k| path[(start + k) % n]).collect();
-
-            let mut reduced: Vec<usize> = Vec::with_capacity(n - chain_length);
-            for i in 0..n {
-                if !ejected.contains(&path[i]) {
-                    reduced.push(path[i]);
-                }
-            }
-
-            // Re-inserción eficiente local O(N) de los nodos eyectados
-            let mut temp_path = reduced;
-            for &node in &ejected {
-                let mut best_pos = 0;
-                let mut best_insert_cost = f32::MAX;
-
-                for pos in 0..=temp_path.len() {
-                    let idx_prev = if pos == 0 {
-                        temp_path.len() - 1
-                    } else {
-                        pos - 1
-                    };
-                    let idx_next = if pos == temp_path.len() { 0 } else { pos };
-
-                    let cost =
-                        insertion_cost(temp_path[idx_prev], temp_path[idx_next], node, nodes);
-                    if cost < best_insert_cost {
-                        best_insert_cost = cost;
-                        best_pos = pos;
-                    }
-                }
-                temp_path.insert(best_pos, node);
-            }
-
-            let final_dist = path_distance(&temp_path, nodes);
-            let delta = final_dist - current_dist;
-
-            // Criterio de aceptación estocástico real de Metrópolis
-            let accept = if delta < 0.0 {
-                true
+            let cost = insertion_cost(path[i], path[next], candidate, nodes);
+            let edge_len = nodes[path[i]].pos.distance(nodes[path[next]].pos);
+            let cost_ratio = if edge_len > 1e-5 {
+                cost / edge_len
             } else {
-                let prob = (-delta / (temperature + 0.001)).exp();
-                self.next_f32() < prob
+                1.0
             };
+            let cost_penalty = 1.0 / (1.0 + cost_ratio);
 
-            if accept && final_dist != current_dist {
-                *path = temp_path;
-                return true;
+            let total_score = angle_score * self.params.w_angle + cost_penalty * self.params.w_cost;
+
+            if total_score > best_score {
+                best_score = total_score;
+                best_pos = i + 1;
             }
         }
 
-        false
+        (best_pos, best_score)
     }
 
     // -------------------------------------------------------------------------
-    // Optimizaciones Locales Heredadas
+    // Post-optimización: 2-Opt, Or-Opt, Node Reinsertion
     // -------------------------------------------------------------------------
 
     fn optimize_2opt(path: &mut Vec<usize>, nodes: &[Node], max_iterations: usize) -> bool {
@@ -430,7 +413,7 @@ impl TriangleInsertionV7 {
                     let current = p1.distance(p2) + p3.distance(p4);
                     let swapped = p1.distance(p3) + p2.distance(p4);
 
-                    if swapped < current - 0.01 {
+                    if swapped < current {
                         path[i + 1..=j].reverse();
                         local_improved = true;
                         improved = true;
@@ -485,11 +468,11 @@ impl TriangleInsertionV7 {
                     let r_prev = reduced[(j + m - 1) % m];
                     let r_next = reduced[j % m];
 
-                    let insertion_cost = nodes[r_prev].distance_to(&nodes[p_first])
+                    let ins_cost = nodes[r_prev].distance_to(&nodes[p_first])
                         + nodes[p_last].distance_to(&nodes[r_next])
                         - nodes[r_prev].distance_to(&nodes[r_next]);
 
-                    if insertion_cost < removal_gain - 0.01 {
+                    if ins_cost < removal_gain - 0.01 {
                         let mut new_path = Vec::with_capacity(n);
                         new_path.extend_from_slice(&reduced[..j]);
                         new_path.extend_from_slice(&seg);
@@ -535,11 +518,11 @@ impl TriangleInsertionV7 {
                     let r_prev = reduced[(j + m - 1) % m];
                     let r_next = reduced[j % m];
 
-                    let insertion_cost = nodes[r_prev].distance_to(&nodes[node_idx])
+                    let ins_cost = nodes[r_prev].distance_to(&nodes[node_idx])
                         + nodes[node_idx].distance_to(&nodes[r_next])
                         - nodes[r_prev].distance_to(&nodes[r_next]);
 
-                    if insertion_cost < removal_gain - 0.01 {
+                    if ins_cost < removal_gain - 0.01 {
                         reduced.insert(j, node_idx);
                         *path = reduced;
                         improved = true;
@@ -560,45 +543,43 @@ impl TriangleInsertionV7 {
 // Implementación del Trait Strategy
 // =============================================================================
 
-impl Strategy for TriangleInsertionV7 {
+impl Strategy for TriangleInsertionV87 {
     fn execute_step(&mut self, current_path: &mut Vec<usize>, nodes: &[Node]) -> bool {
-        // Inicialización de caché de no visitados si es la primera vez o está vacío
-        if current_path.is_empty() && self.unvisited.is_empty() {
+        if current_path.is_empty() && self.unvisited.is_empty() && self.layers.is_empty() {
+            // Calcular capas de onion peeling
+            self.layers = Self::compute_onion_layers(nodes);
             self.unvisited = (0..nodes.len()).collect();
+            self.current_layer = 0;
         }
 
         if self.unvisited.is_empty() {
-            // Post-optimización final metaheurística
-            Self::optimize_2opt(current_path, nodes, 10);
+            Self::optimize_2opt(current_path, nodes, 20);
             Self::optimize_or_opt(current_path, nodes, 1);
             Self::optimize_or_opt(current_path, nodes, 2);
-
-            // Cadenas de eyección finales
-            for chain_len in 2..=4 {
-                for _ in 0..3 {
-                    self.ejection_chain(current_path, nodes, chain_len, self.temperature);
-                }
-            }
-
             Self::optimize_node_reinsertion(current_path, nodes);
+            Self::optimize_2opt(current_path, nodes, 10);
+            Self::optimize_or_opt(current_path, nodes, 1);
             Self::optimize_2opt(current_path, nodes, 5);
             return true;
         }
 
-        // Paso 1: Inicialización con Casco Convexo
         if current_path.is_empty() {
             if nodes.len() < 3 {
                 current_path.extend(0..nodes.len());
                 self.unvisited.clear();
                 return true;
             }
-            let triangle = Self::best_triangle_from_hull(nodes);
-            for &idx in &triangle {
-                if let Some(pos) = self.unvisited.iter().position(|&x| x == idx) {
-                    self.unvisited.swap_remove(pos);
+
+            // Inicializar con la primera capa (convex hull exterior)
+            if let Some(first_layer) = self.layers.first() {
+                for &idx in first_layer {
+                    if let Some(pos) = self.unvisited.iter().position(|&x| x == idx) {
+                        self.unvisited.swap_remove(pos);
+                    }
                 }
+                current_path.extend_from_slice(first_layer);
             }
-            current_path.extend_from_slice(&triangle);
+            self.current_layer = 1;
             self.initialized = true;
             return false;
         }
@@ -607,52 +588,47 @@ impl Strategy for TriangleInsertionV7 {
             return true;
         }
 
-        // Enfriamiento del Recocido Simulado
-        self.iteration += 1;
-        self.temperature = self.initial_temperature * self.cooling_rate.powi(self.iteration as i32);
-
-        // Construcción limpia y veloz O(U log U) del K-D Tree SOLO con no visitados
-        let points: Vec<(Vec2, usize)> = self.unvisited.iter()
-            .map(|&i| (nodes[i].pos, i))
-            .collect();
-        let kdtree = KDTree::build(&points);
-
-        // Paso 2: Inserción geométrica estocástica acelerada
-        let (best_node, best_pos) = self.smoothest_insertion_accelerated(
-            current_path,
-            nodes,
-            &kdtree,
-            self.k_neighbors,
-            self.temperature,
-        );
-        
-        // Quitar de no visitados (O(U))
-        if let Some(pos) = self.unvisited.iter().position(|&x| x == best_node) {
-            self.unvisited.swap_remove(pos);
-        }
-        current_path.insert(best_pos, best_node);
-
-        // Paso 3: Mutación por Ejection Chains en fase constructiva
-        if self.iteration % 5 == 0 && current_path.len() > 6 {
-            self.ejection_chain(current_path, nodes, 2, self.temperature);
+        // Procesar nodos de la capa actual
+        if self.current_layer < self.layers.len() {
+            let layer = &self.layers[self.current_layer];
             
-            // Sincronizar unvisited después de una ejection chain que puede haber cambiado el path
-            // (Aunque ejection_chain solo reordena el path, no cambia qué nodos están en él)
+            // Insertar todos los nodos de esta capa
+            for &node in layer {
+                if let Some(pos) = self.unvisited.iter().position(|&x| x == node) {
+                    self.unvisited.swap_remove(pos);
+                }
+                
+                let (best_pos, _) = self.find_best_insertion(node, current_path, nodes);
+                current_path.insert(best_pos, node);
+            }
+            
+            self.current_layer += 1;
+            return false;
         }
 
-        false
+        // Si no hay más capas, insertar nodos restantes (si los hay)
+        if !self.unvisited.is_empty() {
+            let candidate = self.unvisited[0];
+            let (best_pos, _) = self.find_best_insertion(candidate, current_path, nodes);
+            if let Some(pos) = self.unvisited.iter().position(|&x| x == candidate) {
+                self.unvisited.swap_remove(pos);
+            }
+            current_path.insert(best_pos, candidate);
+            return false;
+        }
+
+        true
     }
 
     fn name(&self) -> &str {
-        "Triangle Insertion V7 (Geo-Accel + Ejection Chains + SA)"
+        "Triangle Insertion V8.7 (Onion Peeling)"
     }
 
     fn reset(&mut self) {
         self.initialized = false;
-        self.iteration = 0;
-        self.temperature = self.initial_temperature;
-        self.rng_state = 12345;
         self.unvisited.clear();
+        self.layers.clear();
+        self.current_layer = 0;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -661,7 +637,7 @@ impl Strategy for TriangleInsertionV7 {
 }
 
 // =============================================================================
-// Tests Unitarios
+// Tests
 // =============================================================================
 
 #[cfg(test)]
@@ -669,7 +645,7 @@ mod tests {
     use super::*;
     use crate::core::Node;
 
-    fn run_to_completion(strategy: &mut TriangleInsertionV7, nodes: &[Node]) -> Vec<usize> {
+    fn run_to_completion(strategy: &mut TriangleInsertionV87, nodes: &[Node]) -> Vec<usize> {
         let mut path = vec![];
         for _ in 0..nodes.len() + 10 {
             if strategy.execute_step(&mut path, nodes) {
@@ -680,36 +656,51 @@ mod tests {
     }
 
     #[test]
-    fn test_v7_visits_all_nodes_square() {
+    fn test_v87_visits_all_nodes_square() {
         let nodes = vec![
             Node::new(0.0, 0.0),
             Node::new(10.0, 0.0),
             Node::new(10.0, 10.0),
             Node::new(0.0, 10.0),
         ];
-        let mut strategy = TriangleInsertionV7::new();
+        let mut strategy = TriangleInsertionV87::new();
         let path = run_to_completion(&mut strategy, &nodes);
         assert_eq!(path.len(), 4, "Debe visitar todos los nodos");
     }
 
     #[test]
-    fn test_v7_kd_tree_acceleration() {
-        let nodes: Vec<Node> = (0..40)
-            .map(|i| Node::new(i as f32 * 1.5, (i % 5) as f32 * 2.0))
-            .collect();
-
-        let mut strategy = TriangleInsertionV7::new();
+    fn test_v87_with_custom_params() {
+        let nodes = vec![
+            Node::new(0.0, 0.0),
+            Node::new(10.0, 0.0),
+            Node::new(10.0, 10.0),
+            Node::new(0.0, 10.0),
+            Node::new(5.0, 5.0),
+        ];
+        let params = V87Params {
+            k_neighbors: 10,
+            w_angle: 0.7,
+            w_cost: 0.3,
+        };
+        let mut strategy = TriangleInsertionV87::with_params(params);
         let path = run_to_completion(&mut strategy, &nodes);
-        assert_eq!(path.len(), 40, "Debe balancear y visitar todo el árbol K-D");
+        assert_eq!(path.len(), 5, "Debe visitar todos los nodos");
     }
 
     #[test]
-    fn test_v7_simulated_annealing_cooling() {
-        let mut strategy = TriangleInsertionV7::new();
-        strategy.iteration = 100;
-        let expected_temp = strategy.initial_temperature * strategy.cooling_rate.powi(100);
-        let actual_temp =
-            strategy.initial_temperature * strategy.cooling_rate.powi(strategy.iteration as i32);
-        assert!((actual_temp - expected_temp).abs() < 0.001);
+    fn test_onion_layers() {
+        // Cuadrado con centro
+        let nodes = vec![
+            Node::new(0.0, 0.0),   // 0: esquina
+            Node::new(10.0, 0.0),  // 1: esquina
+            Node::new(10.0, 10.0), // 2: esquina
+            Node::new(0.0, 10.0),  // 3: esquina
+            Node::new(5.0, 5.0),   // 4: centro
+        ];
+
+        let layers = TriangleInsertionV87::compute_onion_layers(&nodes);
+        assert_eq!(layers.len(), 2, "Debe haber 2 capas");
+        assert_eq!(layers[0].len(), 4, "Capa 1 debe tener 4 nodos (esquinas)");
+        assert_eq!(layers[1].len(), 1, "Capa 2 debe tener 1 nodo (centro)");
     }
 }

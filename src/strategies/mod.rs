@@ -3,6 +3,7 @@ pub mod christofides;
 ///
 /// Permite registrar y ejecutar estrategias de forma consistente,
 /// facilitando la comparación de eficiencia entre algoritmos.
+pub mod lin_kernighan;
 pub mod nearest_neighbor;
 pub mod triangle_insertion;
 pub mod triangle_insertion_v2;
@@ -11,8 +12,13 @@ pub mod triangle_insertion_v4;
 pub mod triangle_insertion_v5;
 pub mod triangle_insertion_v6;
 pub mod triangle_insertion_v7;
+pub mod triangle_insertion_v8;
+pub mod triangle_insertion_v8_5;
+pub mod triangle_insertion_v8_6;
+pub mod triangle_insertion_v8_7;
 
 use crate::core::Node;
+use std::any::Any;
 use std::collections::HashMap;
 
 /// Trait que define una estrategia de solución para TSP
@@ -26,6 +32,9 @@ pub trait Strategy: Send {
 
     /// Reinicia el estado interno de la estrategia
     fn reset(&mut self);
+
+    /// Permite downcast para acceso a métodos específicos de cada estrategia
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// Descriptor declarativo de una estrategia
@@ -131,6 +140,41 @@ pub fn create_registry() -> StrategyRegistry {
         factory: || Box::new(triangle_insertion_v7::TriangleInsertionV7::new()),
     });
 
+    // Registrar Triangle Insertion V8 — Outside-In Angle Optimization
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v8".to_string(),
+        name: "Triangle Insertion V8 (Outside-In Angle Optimization)".to_string(),
+        factory: || Box::new(triangle_insertion_v8::TriangleInsertionV8::new()),
+    });
+
+    // Registrar Triangle Insertion V8.5 — Adaptive LKH-H Integration
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v8_5".to_string(),
+        name: "Triangle Insertion V8.5 (Adaptive LKH-H)".to_string(),
+        factory: || Box::new(triangle_insertion_v8_5::TriangleInsertionV85::new()),
+    });
+
+    // Registrar Triangle Insertion V8.6 — Calibrated Outside-In
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v8_6".to_string(),
+        name: "Triangle Insertion V8.6 (Calibrated)".to_string(),
+        factory: || Box::new(triangle_insertion_v8_6::TriangleInsertionV86::new()),
+    });
+
+    // Registrar Triangle Insertion V8.7 — Onion Peeling
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v8_7".to_string(),
+        name: "Triangle Insertion V8.7 (Onion Peeling)".to_string(),
+        factory: || Box::new(triangle_insertion_v8_7::TriangleInsertionV87::new()),
+    });
+
+    // Registrar Lin-Kernighan (LK Simplificado)
+    registry.register(StrategyDescriptor {
+        id: "lin_kernighan".to_string(),
+        name: "Lin-Kernighan (LK Simplificado)".to_string(),
+        factory: || Box::new(lin_kernighan::LinKernighan::new()),
+    });
+
     registry.register(StrategyDescriptor {
         id: "christofides".to_string(),
         name: "christofides heuristic (O(N3))".to_string(),
@@ -163,6 +207,6 @@ mod tests {
     fn test_list_names() {
         let registry = create_registry();
         let names = registry.list_names();
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 14);
     }
 }

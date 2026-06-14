@@ -68,10 +68,25 @@ async fn main() {
                     }
                 }
                 AppState::Running | AppState::Finished => {
+                    // Volver a Edit manteniendo los nodos fijos
                     state = AppState::Edit;
                     current_path.clear();
-                    nodes = generate_scenario(current_scenario, screen_width(), screen_height());
                     current_strategy.reset();
+                }
+            }
+        }
+
+        // Exportar solución [X]
+        if ui::handle_export() {
+            if !nodes.is_empty() {
+                let filename = format!("tsp_solution_{}.txt", nodes.len());
+                match ui::export_nodes_to_txt(&nodes, &current_path, &filename) {
+                    Ok(_) => {
+                        println!("✓ Solución exportada a: {}", filename);
+                    }
+                    Err(e) => {
+                        eprintln!(" Error exportando: {}", e);
+                    }
                 }
             }
         }
