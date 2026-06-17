@@ -1,19 +1,23 @@
 #![allow(unused)]
-/// Estrategia: Triangle Insertion V8.6 — Calibrated Outside-In
+/// Estrategia: Triangle Insertion V9 — Recursive Edge Insertion (REI)
 ///
-/// Versión de V8 con parámetros calibrables para optimización automática.
+/// En lugar de seleccionar un punto candidato y buscarle la mejor posición,
+/// V9 evalúa todas las aristas del tour actual y elige la mejor inserción
+/// global. Cada arista "pide" su propio punto de subdivisión, priorizando
+/// aquellas cuya geometría (ángulo + costo) resulte más favorable.
+///
 /// Parámetros configurables:
-///   - k_neighbors: número de vecinos a considerar (4, 6, 8, 10, 12, 16)
+///   - k_neighbors: número de vecinos a considerar por arista
 ///   - w_angle: peso del ángulo de inserción (0.0 a 1.0)
 ///   - w_cost: peso de la penalización por costo (0.0 a 1.0)
-///
-/// Nota: El neighborhood_score fue eliminado tras el entrenamiento automático
-/// que demostró que no aporta valor (w_neighborhood=0.00 en las mejores configuraciones).
+///   - w_density: peso extra para favorecer la subdivisión de aristas en zonas densas de no visitados
 use super::Strategy;
 use crate::core::{Node, insertion_cost, path_distance};
 use macroquad::prelude::Vec2;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+
+use ::rand::seq::SliceRandom;
 
 // =============================================================================
 // K-D Tree para Búsqueda de Vecinos (reutilizado de V8)
@@ -38,12 +42,12 @@ impl KDNode {
     }
 }
 
-struct KDTree {
+pub struct KDTree {
     root: Option<Box<KDNode>>,
 }
 
 impl KDTree {
-    fn build(points: &[(Vec2, usize)]) -> Self {
+    pub fn build(points: &[(Vec2, usize)]) -> Self {
         let mut pts = points.to_vec();
         Self {
             root: Self::build_recursive(&mut pts, 0),
@@ -74,7 +78,7 @@ impl KDTree {
         Some(Box::new(node))
     }
 
-    fn find_k_nearest(&self, query: Vec2, k: usize) -> Vec<usize> {
+    pub fn find_k_nearest(&self, query: Vec2, k: usize) -> Vec<usize> {
         let mut heap: BinaryHeap<DistanceItem> = BinaryHeap::with_capacity(k);
         if let Some(ref root) = self.root {
             Self::search_nearest(root, query, k, &mut heap, 0);
@@ -158,46 +162,82 @@ impl Ord for DistanceItem {
 }
 
 // =============================================================================
-// Parámetros de V8.6
+// Cola de prioridad de inserciones por arista
+// =============================================================================
+
+/// Un candidato representa la inserción del nodo `node` entre `path[edge_i]`
+/// y `path[(edge_i + 1) % path.len()]`. La posición de inserción es
+/// `edge_i + 1`.
+#[derive(Clone)]
+struct EdgeCandidate {
+    score: f32,
+    edge_i: usize,
+    node: usize,
+}
+
+impl PartialEq for EdgeCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+impl Eq for EdgeCandidate {}
+
+impl PartialOrd for EdgeCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.score.partial_cmp(&other.score)
+    }
+}
+
+impl Ord for EdgeCandidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // BinaryHeap es un max-heap en Rust: mayor score primero.
+        self.score.partial_cmp(&other.score).unwrap_or(Ordering::Equal)
+    }
+}
+
+// =============================================================================
+// Parámetros de V9
 // =============================================================================
 
 #[derive(Clone, Copy)]
-pub struct V86Params {
+pub struct V9Params {
     pub k_neighbors: usize,
     pub w_angle: f32,
     pub w_cost: f32,
+    pub w_density: f32,
 }
 
-impl Default for V86Params {
+impl Default for V9Params {
     fn default() -> Self {
         Self {
-            k_neighbors: 4,
-            w_angle: 0.25,
-            w_cost: 0.50,
+            k_neighbors: 8,
+            w_angle: 0.40,
+            w_cost: 0.30,
+            w_density: 0.00,
         }
     }
 }
 
 // =============================================================================
-// Triangle Insertion V8.6
+// Triangle Insertion V9
 // =============================================================================
 
-pub struct TriangleInsertionV86 {
+pub struct TriangleInsertionV9 {
     initialized: bool,
     unvisited: Vec<usize>,
-    params: V86Params,
+    params: V9Params,
 }
 
-impl TriangleInsertionV86 {
+impl TriangleInsertionV9 {
     pub fn new() -> Self {
         Self {
             initialized: false,
             unvisited: Vec::new(),
-            params: V86Params::default(),
+            params: V9Params::default(),
         }
     }
 
-    pub fn with_params(params: V86Params) -> Self {
+    pub fn with_params(params: V9Params) -> Self {
         Self {
             initialized: false,
             unvisited: Vec::new(),
@@ -205,11 +245,11 @@ impl TriangleInsertionV86 {
         }
     }
 
-    pub fn set_params(&mut self, params: V86Params) {
+    pub fn set_params(&mut self, params: V9Params) {
         self.params = params;
     }
 
-    pub fn get_params(&self) -> V86Params {
+    pub fn get_params(&self) -> V9Params {
         self.params
     }
 
@@ -218,6 +258,7 @@ impl TriangleInsertionV86 {
             let mut k_neighbors = None;
             let mut w_angle = None;
             let mut w_cost = None;
+            let mut w_density = None;
 
             for line in content.lines() {
                 let line = line.trim();
@@ -229,16 +270,18 @@ impl TriangleInsertionV86 {
                         "k_neighbors" => k_neighbors = value.trim().parse().ok(),
                         "w_angle" => w_angle = value.trim().parse().ok(),
                         "w_cost" => w_cost = value.trim().parse().ok(),
+                        "w_density" => w_density = value.trim().parse().ok(),
                         _ => {}
                     }
                 }
             }
 
-            if let (Some(k), Some(a), Some(c)) = (k_neighbors, w_angle, w_cost) {
-                self.params = V86Params {
+            if let (Some(k), Some(a), Some(c), Some(d)) = (k_neighbors, w_angle, w_cost, w_density) {
+                self.params = V9Params {
                     k_neighbors: k,
                     w_angle: a,
                     w_cost: c,
+                    w_density: d,
                 };
                 return true;
             }
@@ -301,153 +344,8 @@ impl TriangleInsertionV86 {
     }
 
     // -------------------------------------------------------------------------
-    // V8.6 Core: Angle-Optimized Insertion from Outside-In
+    // V9 Core: Recursive Edge Insertion
     // -------------------------------------------------------------------------
-
-    fn angle_at_point(a: usize, u: usize, b: usize, nodes: &[Node]) -> f32 {
-        let p_a = nodes[a].pos;
-        let p_u = nodes[u].pos;
-        let p_b = nodes[b].pos;
-
-        let v1 = p_a - p_u;
-        let v2 = p_b - p_u;
-
-        let len1 = v1.length();
-        let len2 = v2.length();
-
-        if len1 < 1e-5 || len2 < 1e-5 {
-            return 0.0;
-        }
-
-        let cos_theta = (v1.dot(v2) / (len1 * len2)).clamp(-1.0, 1.0);
-        cos_theta.acos()
-    }
-
-    fn outside_in_insertion(
-        &self,
-        path: &[usize],
-        nodes: &[Node],
-        kdtree: &KDTree,
-    ) -> (usize, usize) {
-        if self.unvisited.is_empty() {
-            return (0, 0);
-        }
-
-        // Usar estrategia de gaviotas (calibrada)
-        self.outside_in_insertion_seagull(path, nodes, kdtree)
-    }
-
-    // Estrategia de gaviotas: solo nodos no disputados
-    fn outside_in_insertion_seagull(
-        &self,
-        path: &[usize],
-        nodes: &[Node],
-        kdtree: &KDTree,
-    ) -> (usize, usize) {
-        let mut best_node = self.unvisited[0];
-        let mut best_pos = 1;
-        let mut best_score = f32::MIN;
-
-        let priority_candidates = Self::find_uncontested_candidates(path, nodes, kdtree, &self.unvisited);
-
-        for &candidate in &priority_candidates {
-            for i in 0..path.len() {
-                let next = (i + 1) % path.len();
-
-                let insertion_angle =
-                    Self::compute_insertion_angle(path[i], path[next], candidate, nodes);
-
-                let angle_score = insertion_angle / std::f32::consts::PI;
-
-                let cost = insertion_cost(path[i], path[next], candidate, nodes);
-                let edge_len = nodes[path[i]].pos.distance(nodes[path[next]].pos);
-                let cost_ratio = if edge_len > 1e-5 {
-                    cost / edge_len
-                } else {
-                    1.0
-                };
-                let cost_penalty = 1.0 / (1.0 + cost_ratio);
-
-                let total_score =
-                    angle_score * self.params.w_angle + cost_penalty * self.params.w_cost;
-
-                if total_score > best_score {
-                    best_score = total_score;
-                    best_node = candidate;
-                    best_pos = i + 1;
-                }
-            }
-        }
-
-        (best_node, best_pos)
-    }
-
-    // Encuentra nodos no visitados que son "los más cercanos" a algún nodo del tour
-    // Analogía: gaviotas que no tienen competencia por comida
-    fn find_uncontested_candidates(
-        path: &[usize],
-        nodes: &[Node],
-        kdtree: &KDTree,
-        unvisited: &[usize],
-    ) -> Vec<usize> {
-        if path.is_empty() || unvisited.is_empty() {
-            return unvisited.to_vec();
-        }
-
-        let mut uncontested: Vec<usize> = Vec::new();
-
-        // Para cada nodo del tour, encontrar el no visitado más cercano
-        for &tour_node in path {
-            let candidates = kdtree.find_k_nearest(nodes[tour_node].pos, 8);
-            
-            // Buscar el primer candidato que no esté visitado
-            for &candidate in &candidates {
-                if unvisited.contains(&candidate) {
-                    // Este candidato es el más cercano a tour_node
-                    // Verificar si ya está en la lista
-                    if !uncontested.contains(&candidate) {
-                        uncontested.push(candidate);
-                    }
-                    break;
-                }
-            }
-        }
-
-        // Si no encontramos candidatos uncontested (caso raro), usar todos
-        if uncontested.is_empty() {
-            return unvisited.to_vec();
-        }
-
-        // Fallback: si encontramos muy pocos candidatos, agregar más
-        // para evitar decisiones subóptimas
-        if uncontested.len() < 3 && unvisited.len() > 3 {
-            // Agregar algunos candidatos adicionales basados en el centro del path
-            let center = Self::compute_path_center(path, nodes);
-            let additional = kdtree.find_k_nearest(center, 8);
-            for &candidate in &additional {
-                if unvisited.contains(&candidate) && !uncontested.contains(&candidate) {
-                    uncontested.push(candidate);
-                    if uncontested.len() >= 5 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        uncontested
-    }
-
-    fn compute_path_center(path: &[usize], nodes: &[Node]) -> Vec2 {
-        if path.is_empty() {
-            return Vec2::ZERO;
-        }
-
-        let mut sum = Vec2::ZERO;
-        for &idx in path {
-            sum += nodes[idx].pos;
-        }
-        sum / path.len() as f32
-    }
 
     fn compute_insertion_angle(i: usize, j: usize, u: usize, nodes: &[Node]) -> f32 {
         let p_i = nodes[i].pos;
@@ -466,6 +364,113 @@ impl TriangleInsertionV86 {
 
         let cos_theta = (v1.dot(v2) / (len1 * len2)).clamp(-1.0, 1.0);
         cos_theta.acos()
+    }
+
+    fn compute_path_center(path: &[usize], nodes: &[Node]) -> Vec2 {
+        if path.is_empty() {
+            return Vec2::ZERO;
+        }
+
+        let mut sum = Vec2::ZERO;
+        for &idx in path {
+            sum += nodes[idx].pos;
+        }
+        sum / path.len() as f32
+    }
+
+    /// Evalúa la conveniencia de insertar `u` entre `i` y `j`.
+    /// `density_ratio` indica qué proporción de los vecinos cercanos al punto
+    /// medio de la arista aún no han sido visitados (0.0 a 1.0).
+    fn insertion_score(
+        &self,
+        i: usize,
+        j: usize,
+        u: usize,
+        nodes: &[Node],
+        density_ratio: f32,
+    ) -> f32 {
+        let insertion_angle = Self::compute_insertion_angle(i, j, u, nodes);
+        let angle_score = insertion_angle / std::f32::consts::PI;
+
+        let cost = insertion_cost(i, j, u, nodes);
+        let edge_len = nodes[i].pos.distance(nodes[j].pos);
+        let cost_ratio = if edge_len > 1e-5 { cost / edge_len } else { 1.0 };
+        let cost_penalty = 1.0 / (1.0 + cost_ratio);
+
+        // Factor de densidad local: premia insertar en aristas que atraviesan
+        // zonas con muchos puntos no visitados cercanos. Esto ayuda a rellenar
+        // clusters densos antes de hacer saltos largos entre zonas vacías.
+        let density_score = density_ratio.clamp(0.0, 1.0);
+
+        angle_score * self.params.w_angle
+            + cost_penalty * self.params.w_cost
+            + density_score * self.params.w_density
+    }
+
+    /// Encuentra la mejor inserción considerando todas las aristas del tour.
+    /// Devuelve (nodo_a_insertar, posicion_de_insercion).
+    fn find_best_edge_insertion(
+        &self,
+        path: &[usize],
+        nodes: &[Node],
+        kdtree: &KDTree,
+    ) -> (usize, usize) {
+        if self.unvisited.is_empty() {
+            return (0, 0);
+        }
+
+        let n = path.len();
+        if n < 2 {
+            return (self.unvisited[0], 0);
+        }
+
+        let mut heap: BinaryHeap<EdgeCandidate> = BinaryHeap::new();
+        let k = self.params.k_neighbors.max(1);
+
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let p_i = nodes[path[i]].pos;
+            let p_j = nodes[path[j]].pos;
+            let midpoint = (p_i + p_j) * 0.5;
+
+            // Buscar candidatos cercanos al punto medio de la arista.
+            let nearby = kdtree.find_k_nearest(midpoint, k);
+
+            // Medir densidad local: proporción de vecinos que aún no han sido visitados.
+            let unvisited_nearby = nearby
+                .iter()
+                .filter(|&&candidate| self.unvisited.contains(&candidate))
+                .count();
+            let density_ratio = unvisited_nearby as f32 / k as f32;
+
+            for &candidate in &nearby {
+                if !self.unvisited.contains(&candidate) {
+                    continue;
+                }
+
+                let score = self.insertion_score(path[i], path[j], candidate, nodes, density_ratio);
+                heap.push(EdgeCandidate {
+                    score,
+                    edge_i: i,
+                    node: candidate,
+                });
+            }
+        }
+
+        // Tomar el mejor candidato. Si el mejor ya fue visitado por un paso
+        // concurrente (no aplica en este trait), simplemente tomamos el
+        // siguiente de la cola.
+        while let Some(best) = heap.pop() {
+            if self.unvisited.contains(&best.node) {
+                let insert_pos = (best.edge_i + 1) % (n + 1);
+                let insert_pos = if insert_pos == 0 { n } else { insert_pos };
+                return (best.node, insert_pos);
+            }
+        }
+
+        // Fallback: si la cola quedó vacía (por ejemplo, kdtree no devolvió
+        // no visitados), usar el primer no visitado.
+        (self.unvisited[0], 1)
     }
 
     // -------------------------------------------------------------------------
@@ -615,11 +620,9 @@ impl TriangleInsertionV86 {
     }
 
     // -------------------------------------------------------------------------
-    // Post-optimización: Bubble Removal (Detección y Eliminación de Curvas Cerradas)
+    // Post-optimización: Bubble Removal
     // -------------------------------------------------------------------------
 
-    /// Detecta y elimina "burbujas" - secuencias de aristas que forman curvas cerradas innecesarias.
-    /// Una burbuja ocurre cuando el tour da una vuelta cerrada que podría "apretarse" para reducir distancia.
     fn optimize_bubble_removal(path: &mut Vec<usize>, nodes: &[Node]) -> bool {
         let n = path.len();
         if n < 4 {
@@ -635,20 +638,17 @@ impl TriangleInsertionV86 {
             improved = false;
             iterations += 1;
 
-            // Buscar segmentos de 3-6 nodos que formen curvas cerradas
             for seg_len in 3..=6 {
                 if n < seg_len + 1 {
                     continue;
                 }
 
                 for i in 0..n {
-                    // Obtener el segmento y sus vecinos
                     let seg_start = i;
                     let seg_end = (i + seg_len) % n;
                     let prev = (i + n - 1) % n;
                     let next = (i + seg_len + 1) % n;
 
-                    // Calcular distancia actual del segmento
                     let mut current_dist = 0.0;
                     current_dist += nodes[path[prev]].distance_to(&nodes[path[seg_start]]);
                     for k in 0..seg_len {
@@ -658,8 +658,7 @@ impl TriangleInsertionV86 {
                     }
                     current_dist += nodes[path[seg_end]].distance_to(&nodes[path[next]]);
 
-                    // Intentar reconectar el segmento de forma más directa
-                    // Opción 1: Invertir el segmento
+                    // Opción 1: invertir el segmento
                     let mut reversed_path = path.clone();
                     let mut seg_indices: Vec<usize> = (0..seg_len).map(|k| (i + k) % n).collect();
                     seg_indices.reverse();
@@ -668,13 +667,16 @@ impl TriangleInsertionV86 {
                     }
 
                     let mut reversed_dist = 0.0;
-                    reversed_dist += nodes[reversed_path[prev]].distance_to(&nodes[reversed_path[i]]);
+                    reversed_dist +=
+                        nodes[reversed_path[prev]].distance_to(&nodes[reversed_path[i]]);
                     for k in 0..seg_len {
                         let curr = (i + k) % n;
                         let next_node = (i + k + 1) % n;
-                        reversed_dist += nodes[reversed_path[curr]].distance_to(&nodes[reversed_path[next_node]]);
+                        reversed_dist += nodes[reversed_path[curr]]
+                            .distance_to(&nodes[reversed_path[next_node]]);
                     }
-                    reversed_dist += nodes[reversed_path[seg_end]].distance_to(&nodes[reversed_path[next]]);
+                    reversed_dist +=
+                        nodes[reversed_path[seg_end]].distance_to(&nodes[reversed_path[next]]);
 
                     if reversed_dist < current_dist - 0.01 {
                         *path = reversed_path;
@@ -683,20 +685,19 @@ impl TriangleInsertionV86 {
                         break;
                     }
 
-                    // Opción 2: Reemplazar segmento por conexión directa (si es posible)
-                    // Conectar prev -> next directamente, reinsertar nodos del segmento en mejores posiciones
+                    // Opción 2: reemplazar segmento por conexión directa
                     if seg_len <= 4 {
                         let mut direct_path: Vec<usize> = Vec::with_capacity(n);
                         for k in 0..n {
                             let idx = (i + k) % n;
                             if k >= 1 && k <= seg_len {
-                                continue; // Saltar nodos del segmento
+                                continue;
                             }
                             direct_path.push(path[idx]);
                         }
 
-                        // Reinsertar nodos del segmento en mejores posiciones
-                        let segment_nodes: Vec<usize> = (1..=seg_len).map(|k| path[(i + k) % n]).collect();
+                        let segment_nodes: Vec<usize> =
+                            (1..=seg_len).map(|k| path[(i + k) % n]).collect();
                         let mut temp_path = direct_path.clone();
 
                         for &node in &segment_nodes {
@@ -705,7 +706,9 @@ impl TriangleInsertionV86 {
 
                             for j in 0..temp_path.len() {
                                 let next = (j + 1) % temp_path.len();
-                                let cost = crate::core::insertion_cost(temp_path[j], temp_path[next], node, nodes);
+                                let cost = crate::core::insertion_cost(
+                                    temp_path[j], temp_path[next], node, nodes,
+                                );
                                 if cost < best_cost {
                                     best_cost = cost;
                                     best_pos = j + 1;
@@ -738,24 +741,99 @@ impl TriangleInsertionV86 {
 }
 
 // =============================================================================
+// Búsqueda local completa y ILS
+// =============================================================================
+
+impl TriangleInsertionV9 {
+    /// Aplica toda la búsqueda local de V9 sobre `path`.
+    pub fn optimize_full(path: &mut Vec<usize>, nodes: &[Node]) {
+        Self::optimize_2opt(path, nodes, 20);
+        Self::optimize_or_opt(path, nodes, 1);
+        Self::optimize_or_opt(path, nodes, 2);
+        Self::optimize_node_reinsertion(path, nodes);
+        Self::optimize_bubble_removal(path, nodes);
+        Self::optimize_2opt(path, nodes, 10);
+        Self::optimize_or_opt(path, nodes, 1);
+        Self::optimize_2opt(path, nodes, 5);
+    }
+
+    /// Perturbación double-bridge: corta el tour en 4 puntos y reconecta
+    /// cruzado para escapar de óptimos locales sin destruir la solución.
+    fn double_bridge_perturb(path: &[usize]) -> Vec<usize> {
+        let n = path.len();
+        if n < 8 {
+            return path.to_vec();
+        }
+
+        let mut rng = ::rand::rng();
+        let mut cuts: Vec<usize> = (1..n - 1).collect();
+        cuts.shuffle(&mut rng);
+        cuts.truncate(4);
+        cuts.sort();
+
+        let [a, b, c, d] = [cuts[0], cuts[1], cuts[2], cuts[3]];
+
+        // Reconexión cruzada: A + D + C + B + E
+        let mut new_path = Vec::with_capacity(n);
+        new_path.extend_from_slice(&path[..a]);
+        new_path.extend_from_slice(&path[c..d]);
+        new_path.extend_from_slice(&path[b..c]);
+        new_path.extend_from_slice(&path[a..b]);
+        new_path.extend_from_slice(&path[d..]);
+        new_path
+    }
+
+    /// Construye una solución completa con V9 (constructor + búsqueda local).
+    pub fn build_solution(nodes: &[Node], params: V9Params) -> Vec<usize> {
+        let mut strategy = Self::with_params(params);
+        let mut path = Vec::new();
+        for _ in 0..nodes.len() + 500 {
+            if strategy.execute_step(&mut path, nodes) {
+                break;
+            }
+        }
+        path
+    }
+
+    /// Iterated Local Search guiada por double-bridge perturbations.
+    /// Devuelve el mejor tour encontrado y su distancia.
+    pub fn solve_ils(
+        nodes: &[Node],
+        params: V9Params,
+        max_iters: usize,
+    ) -> (Vec<usize>, f32) {
+        let mut best = Self::build_solution(nodes, params);
+        let mut best_dist = path_distance(&best, nodes);
+        let mut current = best.clone();
+
+        for _ in 0..max_iters {
+            let mut candidate = Self::double_bridge_perturb(&current);
+            Self::optimize_full(&mut candidate, nodes);
+
+            let candidate_dist = path_distance(&candidate, nodes);
+            if candidate_dist < best_dist {
+                best_dist = candidate_dist;
+                best = candidate.clone();
+                current = candidate;
+            }
+        }
+
+        (best, best_dist)
+    }
+}
+
+// =============================================================================
 // Implementación del Trait Strategy
 // =============================================================================
 
-impl Strategy for TriangleInsertionV86 {
+impl Strategy for TriangleInsertionV9 {
     fn execute_step(&mut self, current_path: &mut Vec<usize>, nodes: &[Node]) -> bool {
         if current_path.is_empty() && self.unvisited.is_empty() {
             self.unvisited = (0..nodes.len()).collect();
         }
 
         if self.unvisited.is_empty() {
-            Self::optimize_2opt(current_path, nodes, 20);
-            Self::optimize_or_opt(current_path, nodes, 1);
-            Self::optimize_or_opt(current_path, nodes, 2);
-            Self::optimize_node_reinsertion(current_path, nodes);
-            Self::optimize_bubble_removal(current_path, nodes);
-            Self::optimize_2opt(current_path, nodes, 10);
-            Self::optimize_or_opt(current_path, nodes, 1);
-            Self::optimize_2opt(current_path, nodes, 5);
+            Self::optimize_full(current_path, nodes);
             return true;
         }
 
@@ -781,10 +859,9 @@ impl Strategy for TriangleInsertionV86 {
             return true;
         }
 
-        // K-D tree con TODOS los nodos (visitados y no visitados)
-        // Los visitados sirven como referencias para encontrar no visitados cercanos
-        let points: Vec<(Vec2, usize)> =
-            (0..nodes.len()).map(|i| (nodes[i].pos, i)).collect();
+        // K-D tree con todos los nodos; se usa para encontrar candidatos
+        // cercanos a cada arista del tour.
+        let points: Vec<(Vec2, usize)> = (0..nodes.len()).map(|i| (nodes[i].pos, i)).collect();
 
         if points.is_empty() {
             return true;
@@ -792,7 +869,7 @@ impl Strategy for TriangleInsertionV86 {
 
         let kdtree = KDTree::build(&points);
 
-        let (best_node, best_pos) = self.outside_in_insertion(current_path, nodes, &kdtree);
+        let (best_node, best_pos) = self.find_best_edge_insertion(current_path, nodes, &kdtree);
 
         if let Some(pos) = self.unvisited.iter().position(|&x| x == best_node) {
             self.unvisited.swap_remove(pos);
@@ -803,7 +880,7 @@ impl Strategy for TriangleInsertionV86 {
     }
 
     fn name(&self) -> &str {
-        "Triangle Insertion V8.6 (Calibrated)"
+        "Triangle Insertion V9 (Recursive Edge Insertion)"
     }
 
     fn reset(&mut self) {
@@ -825,7 +902,7 @@ mod tests {
     use super::*;
     use crate::core::Node;
 
-    fn run_to_completion(strategy: &mut TriangleInsertionV86, nodes: &[Node]) -> Vec<usize> {
+    fn run_to_completion(strategy: &mut TriangleInsertionV9, nodes: &[Node]) -> Vec<usize> {
         let mut path = vec![];
         for _ in 0..nodes.len() + 10 {
             if strategy.execute_step(&mut path, nodes) {
@@ -836,20 +913,20 @@ mod tests {
     }
 
     #[test]
-    fn test_v86_visits_all_nodes_square() {
+    fn test_v9_visits_all_nodes_square() {
         let nodes = vec![
             Node::new(0.0, 0.0),
             Node::new(10.0, 0.0),
             Node::new(10.0, 10.0),
             Node::new(0.0, 10.0),
         ];
-        let mut strategy = TriangleInsertionV86::new();
+        let mut strategy = TriangleInsertionV9::new();
         let path = run_to_completion(&mut strategy, &nodes);
         assert_eq!(path.len(), 4, "Debe visitar todos los nodos");
     }
 
     #[test]
-    fn test_v86_with_custom_params() {
+    fn test_v9_with_custom_params() {
         let nodes = vec![
             Node::new(0.0, 0.0),
             Node::new(10.0, 0.0),
@@ -857,36 +934,32 @@ mod tests {
             Node::new(0.0, 10.0),
             Node::new(5.0, 5.0),
         ];
-        let params = V86Params {
+        let params = V9Params {
             k_neighbors: 10,
             w_angle: 0.7,
             w_cost: 0.3,
+            w_density: 0.0,
         };
-        let mut strategy = TriangleInsertionV86::with_params(params);
+        let mut strategy = TriangleInsertionV9::with_params(params);
         let path = run_to_completion(&mut strategy, &nodes);
         assert_eq!(path.len(), 5, "Debe visitar todos los nodos");
     }
 
     #[test]
     fn test_2opt_fixes_crossing() {
-        // Crea un tour con cruces evidentes (como en la imagen del usuario)
-        // Tour: 0->1->2->3->4->5->0 (con cruces)
-        // Debería ser: 0->1->4->5->3->2->0 (sin cruces)
         let nodes = vec![
-            Node::new(0.0, 10.0),  // 0: arriba-izquierda
-            Node::new(10.0, 10.0), // 1: arriba-derecha
-            Node::new(5.0, 5.0),   // 2: centro
-            Node::new(0.0, 0.0),   // 3: abajo-izquierda
-            Node::new(5.0, 0.0),   // 4: abajo-centro
-            Node::new(10.0, 0.0),  // 5: abajo-derecha
+            Node::new(0.0, 10.0),
+            Node::new(10.0, 10.0),
+            Node::new(5.0, 5.0),
+            Node::new(0.0, 0.0),
+            Node::new(5.0, 0.0),
+            Node::new(10.0, 0.0),
         ];
 
-        // Tour con cruces: 0->1->2->3->4->5->0
         let mut path_with_crossing = vec![0, 1, 2, 3, 4, 5];
         let dist_before = path_distance(&path_with_crossing, &nodes);
 
-        // Aplicar 2-opt
-        TriangleInsertionV86::optimize_2opt(&mut path_with_crossing, &nodes, 20);
+        TriangleInsertionV9::optimize_2opt(&mut path_with_crossing, &nodes, 20);
 
         let dist_after = path_distance(&path_with_crossing, &nodes);
         assert!(

@@ -1,6 +1,7 @@
 use crate::core::Node;
 /// Módulo de interfaz de usuario y renderizado
 use macroquad::prelude::*;
+use ::rand::RngExt;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum AppState {
@@ -10,8 +11,8 @@ pub enum AppState {
 }
 
 pub struct UIConfig {
-    pub step_delay: f32, // Segundos entre pasos
-    pub ui_height: f32,  // Altura del HUD
+    pub step_delay: f32,
+    pub ui_height: f32,
 }
 
 impl Default for UIConfig {
@@ -21,6 +22,115 @@ impl Default for UIConfig {
             ui_height: 140.0,
         }
     }
+}
+
+pub struct RandomGeneratorState {
+    pub input_text: String,
+    pub is_active: bool,
+}
+
+impl Default for RandomGeneratorState {
+    fn default() -> Self {
+        Self {
+            input_text: String::new(),
+            is_active: false,
+        }
+    }
+}
+
+impl RandomGeneratorState {
+    pub fn handle_input(&mut self) {
+        if !self.is_active {
+            return;
+        }
+
+        if let Some(key) = get_last_key_pressed() {
+            match key {
+                KeyCode::Key0 => self.input_text.push('0'),
+                KeyCode::Key1 => self.input_text.push('1'),
+                KeyCode::Key2 => self.input_text.push('2'),
+                KeyCode::Key3 => self.input_text.push('3'),
+                KeyCode::Key4 => self.input_text.push('4'),
+                KeyCode::Key5 => self.input_text.push('5'),
+                KeyCode::Key6 => self.input_text.push('6'),
+                KeyCode::Key7 => self.input_text.push('7'),
+                KeyCode::Key8 => self.input_text.push('8'),
+                KeyCode::Key9 => self.input_text.push('9'),
+                KeyCode::Backspace => {
+                    self.input_text.pop();
+                }
+                KeyCode::Escape => {
+                    self.is_active = false;
+                    self.input_text.clear();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn get_count(&self) -> Option<usize> {
+        self.input_text.parse().ok()
+    }
+}
+
+fn get_last_key_pressed() -> Option<KeyCode> {
+    let keys = [
+        KeyCode::Key0,
+        KeyCode::Key1,
+        KeyCode::Key2,
+        KeyCode::Key3,
+        KeyCode::Key4,
+        KeyCode::Key5,
+        KeyCode::Key6,
+        KeyCode::Key7,
+        KeyCode::Key8,
+        KeyCode::Key9,
+        KeyCode::Backspace,
+        KeyCode::Escape,
+    ];
+    for key in keys {
+        if is_key_pressed(key) {
+            return Some(key);
+        }
+    }
+    None
+}
+
+pub fn generate_random_points(count: usize, width: f32, height: f32, y_offset: f32) -> Vec<Node> {
+    let mut rng = ::rand::rng();
+    let mut nodes = Vec::with_capacity(count);
+    for _ in 0..count {
+        let x = rng.random_range(0.0..width);
+        let y = rng.random_range(y_offset..height);
+        nodes.push(Node::new(x, y));
+    }
+    nodes
+}
+
+pub fn generate_cluster_points(count: usize, width: f32, height: f32, y_offset: f32) -> Vec<Node> {
+    let mut rng = ::rand::rng();
+    let num_clusters = (count as f32).sqrt().ceil() as usize;
+    let mut nodes = Vec::with_capacity(count);
+
+    let area_height = height - y_offset;
+
+    let mut cluster_centers: Vec<Vec2> = Vec::new();
+    for _ in 0..num_clusters {
+        cluster_centers.push(Vec2::new(
+            rng.random_range(0.0..width),
+            rng.random_range(y_offset..height),
+        ));
+    }
+
+    let spread = (width.max(area_height) / num_clusters as f32) * 0.5;
+
+    for i in 0..count {
+        let center = cluster_centers[i % num_clusters];
+        let x = center.x + rng.random_range(-spread..spread);
+        let y = center.y + rng.random_range(-spread..spread);
+        nodes.push(Node::new(x.clamp(0.0, width), y.clamp(y_offset, height)));
+    }
+    nodes
 }
 
 /// Renderiza la interfaz de usuario (HUD)
@@ -77,6 +187,13 @@ pub fn render_hud(
         WHITE,
     );
     draw_text(
+        "[R] Generar N puntos aleatorios  |  [G] Generar clusters",
+        20.0,
+        screen_height() - 60.0,
+        16.0,
+        DARKGRAY,
+    );
+    draw_text(
         "[C] Resetear a modo Manual vacio",
         20.0,
         screen_height() - 40.0,
@@ -89,6 +206,53 @@ pub fn render_hud(
         screen_height() - 20.0,
         16.0,
         DARKGRAY,
+    );
+}
+
+pub fn render_random_input_dialog(state: &RandomGeneratorState, mode: &str) {
+    if !state.is_active {
+        return;
+    }
+
+    let screen_w = screen_width();
+    let screen_h = screen_height();
+    let dialog_w = 400.0;
+    let dialog_h = 150.0;
+    let x = (screen_w - dialog_w) / 2.0;
+    let y = (screen_h - dialog_h) / 2.0;
+
+    draw_rectangle(x, y, dialog_w, dialog_h, Color::new(0.15, 0.15, 0.15, 0.95));
+    draw_rectangle_lines(x, y, dialog_w, dialog_h, 2.0, WHITE);
+
+    draw_text(
+        &format!("Generar {} - Ingresa cantidad:", mode),
+        x + 20.0,
+        y + 35.0,
+        18.0,
+        WHITE,
+    );
+
+    let input_x = x + 20.0;
+    let input_y = y + 55.0;
+    let input_w = dialog_w - 40.0;
+    let input_h = 35.0;
+
+    draw_rectangle(input_x, input_y, input_w, input_h, Color::new(0.1, 0.1, 0.1, 1.0));
+    draw_rectangle_lines(input_x, input_y, input_w, input_h, 2.0, YELLOW);
+
+    let display_text = if state.input_text.is_empty() {
+        "0".to_string()
+    } else {
+        state.input_text.clone()
+    };
+    draw_text(&display_text, input_x + 10.0, input_y + 25.0, 24.0, WHITE);
+
+    draw_text(
+        "[ENTER] Generar  |  [ESC] Cancelar",
+        x + 20.0,
+        y + 120.0,
+        14.0,
+        LIGHTGRAY,
     );
 }
 
@@ -149,6 +313,21 @@ pub fn handle_reset() -> bool {
 /// Detecta exportación con [X]
 pub fn handle_export() -> bool {
     is_key_pressed(KeyCode::X)
+}
+
+/// Detecta generación de puntos aleatorios con [R]
+pub fn handle_random_generate() -> bool {
+    is_key_pressed(KeyCode::R)
+}
+
+/// Detecta generación de clusters con [G]
+pub fn handle_cluster_generate() -> bool {
+    is_key_pressed(KeyCode::G)
+}
+
+/// Detecta confirmación con [ENTER]
+pub fn handle_confirm() -> bool {
+    is_key_pressed(KeyCode::Enter)
 }
 
 /// Exporta las coordenadas de los nodos a un archivo TXT

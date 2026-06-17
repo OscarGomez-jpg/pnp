@@ -63,15 +63,11 @@ fn main() {
     println!("{}", "-".repeat(100));
 
     let strategy_ids = vec![
-        "nearest_neighbor",
-        "christofides",
         "lin_kernighan",
-        "triangle_insertion",
-        "triangle_insertion_v6",
-        "triangle_insertion_v7",
-        "triangle_insertion_v8",
-        "triangle_insertion_v8_5",
-        "triangle_insertion_v8_6",
+        "triangle_insertion_v8_9",
+        "triangle_insertion_v9",
+        "triangle_insertion_v9_hybrid",
+        "triangle_insertion_v9_ils",
     ];
 
     for instance_path in &instances {
@@ -199,51 +195,12 @@ fn main() {
     let synthetic_name = "Synthetic-1000";
 
     for id in &strategy_ids {
-        if *id == "triangle_insertion_v6" && synthetic_nodes.len() > 500 {
+        if (*id == "lin_kernighan" || *id == "triangle_insertion_v9_ils") && synthetic_nodes.len() > 500 {
             println!(
                 "{:<12} {:<6} {:<35} {:<12} {:<10} {:<10} {:<10}",
                 synthetic_name,
                 1000,
-                "V6 (Skipped >500 nodes)",
-                "---",
-                "---",
-                "N/A",
-                "N/A"
-            );
-            continue;
-        }
-        if *id == "triangle_insertion_v8_5" && synthetic_nodes.len() > 500 {
-            println!(
-                "{:<12} {:<6} {:<35} {:<12} {:<10} {:<10} {:<10}",
-                synthetic_name,
-                1000,
-                "V8.5 (Skipped >500 nodes)",
-                "---",
-                "---",
-                "N/A",
-                "N/A"
-            );
-            continue;
-        }
-        if *id == "triangle_insertion_v8_6" && synthetic_nodes.len() > 500 {
-            println!(
-                "{:<12} {:<6} {:<35} {:<12} {:<10} {:<10} {:<10}",
-                synthetic_name,
-                1000,
-                "V8.6 (Skipped >500 nodes)",
-                "---",
-                "---",
-                "N/A",
-                "N/A"
-            );
-            continue;
-        }
-        if *id == "lin_kernighan" && synthetic_nodes.len() > 500 {
-            println!(
-                "{:<12} {:<6} {:<35} {:<12} {:<10} {:<10} {:<10}",
-                synthetic_name,
-                1000,
-                "LK (Skipped >500 nodes)",
+                if *id == "lin_kernighan" { "LK (Skipped >500 nodes)" } else { "V9+ILS (Skipped >500 nodes)" },
                 "---",
                 "---",
                 "N/A",

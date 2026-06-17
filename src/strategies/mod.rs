@@ -16,6 +16,10 @@ pub mod triangle_insertion_v8;
 pub mod triangle_insertion_v8_5;
 pub mod triangle_insertion_v8_6;
 pub mod triangle_insertion_v8_7;
+pub mod triangle_insertion_v8_9;
+pub mod triangle_insertion_v9;
+pub mod triangle_insertion_v9_hybrid;
+pub mod v9_ils;
 
 use crate::core::Node;
 use std::any::Any;
@@ -168,6 +172,34 @@ pub fn create_registry() -> StrategyRegistry {
         factory: || Box::new(triangle_insertion_v8_7::TriangleInsertionV87::new()),
     });
 
+    // Registrar Triangle Insertion V8.9 — Pre-Seagull (Original)
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v8_9".to_string(),
+        name: "Triangle Insertion V8.9 (Pre-Seagull)".to_string(),
+        factory: || Box::new(triangle_insertion_v8_9::TriangleInsertionV89::new()),
+    });
+
+    // Registrar Triangle Insertion V9 — Recursive Edge Insertion
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v9".to_string(),
+        name: "Triangle Insertion V9 (Recursive Edge Insertion)".to_string(),
+        factory: || Box::new(triangle_insertion_v9::TriangleInsertionV9::new()),
+    });
+
+    // Registrar Triangle Insertion V9 Hybrid — Selector V9/V8.9
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v9_hybrid".to_string(),
+        name: "Triangle Insertion V9 Hybrid (V9/V8.9 Selector)".to_string(),
+        factory: || Box::new(triangle_insertion_v9_hybrid::TriangleInsertionV9Hybrid::new()),
+    });
+
+    // Registrar Triangle Insertion V9 + ILS
+    registry.register(StrategyDescriptor {
+        id: "triangle_insertion_v9_ils".to_string(),
+        name: "Triangle Insertion V9 + ILS".to_string(),
+        factory: || Box::new(v9_ils::TriangleInsertionV9Ils::new()),
+    });
+
     // Registrar Lin-Kernighan (LK Simplificado)
     registry.register(StrategyDescriptor {
         id: "lin_kernighan".to_string(),
@@ -207,6 +239,6 @@ mod tests {
     fn test_list_names() {
         let registry = create_registry();
         let names = registry.list_names();
-        assert_eq!(names.len(), 14);
+        assert_eq!(names.len(), 18);
     }
 }

@@ -1,11 +1,13 @@
 /// Generador de visualización HTML mejorada para debugging de V8.6
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::process::Command;
-use traveler::core::insertion_cost;
+use traveler::core::{insertion_cost, Node};
 use traveler::strategies::triangle_insertion_v8_6::{TriangleInsertionV86, V86Params};
 use traveler::strategies::Strategy;
 use traveler::tsplib::TspInstance;
+use macroquad::prelude::Vec2;
+use rand::RngExt;
 
 struct InsertionStep {
     step: usize,
@@ -93,21 +95,133 @@ fn run_lkh(instance: &TspInstance) -> Option<Vec<usize>> {
     }
 }
 
+fn generate_cluster_instance(num_cities: usize, width: f32, height: f32) -> TspInstance {
+    let mut rng = rand::rng();
+    let num_clusters = (num_cities as f32).sqrt().ceil() as usize;
+    let mut nodes = Vec::with_capacity(num_cities);
+
+    let mut cluster_centers: Vec<Vec2> = Vec::new();
+    for _ in 0..num_clusters {
+        cluster_centers.push(Vec2::new(
+            rng.random_range(0.0..width),
+            rng.random_range(0.0..height),
+        ));
+    }
+
+    let spread = (width.max(height) / num_clusters as f32) * 0.5;
+
+    for i in 0..num_cities {
+        let center = cluster_centers[i % num_clusters];
+        let x = center.x + rng.random_range(-spread..spread);
+        let y = center.y + rng.random_range(-spread..spread);
+        nodes.push(Node {
+            pos: Vec2::new(x.clamp(0.0, width), y.clamp(0.0, height)),
+        });
+    }
+
+    TspInstance {
+        name: format!("cluster_{}", num_cities),
+        dimension: num_cities,
+        nodes,
+        optimal_distance: None,
+    }
+}
+
+fn generate_random_instance(num_cities: usize, width: f32, height: f32) -> TspInstance {
+    let mut rng = rand::rng();
+    let mut nodes = Vec::with_capacity(num_cities);
+
+    for _ in 0..num_cities {
+        let x = rng.random_range(0.0..width);
+        let y = rng.random_range(0.0..height);
+        nodes.push(Node {
+            pos: Vec2::new(x, y),
+        });
+    }
+
+    TspInstance {
+        name: format!("random_{}", num_cities),
+        dimension: num_cities,
+        nodes,
+        optimal_distance: None,
+    }
+}
+
+fn prompt_input(prompt: &str) -> String {
+    print!("{}", prompt);
+    io::stdout().flush().unwrap();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    input.trim().to_string()
+}
+
 fn main() {
     println!("════════════════════════════════════════════════════════════════╗");
     println!("║     Generador de Visualización V8.6 (Mejorada)               ║");
     println!("════════════════════════════════════════════════════════════════╝\n");
 
-    let instance_path = "assets/berlin52.tsp";
-    let instance = match TspInstance::from_file(instance_path) {
-        Ok(inst) => inst,
-        Err(e) => {
-            eprintln!("Error cargando {}: {}", instance_path, e);
+    println!("¿Qué deseas hacer?");
+    println!("  1. Cargar instancia TSPLIB");
+    println!("  2. Generar puntos aleatorios");
+    println!("  3. Generar puntos aleatorios (distribución en cluster)");
+    print!("\nOpción (1/2/3): ");
+    io::stdout().flush().unwrap();
+
+    let mut choice = String::new();
+    io::stdin().read_line(&mut choice).unwrap();
+    let choice = choice.trim();
+
+    let instance = match choice {
+        "1" => {
+            let default_path = "assets/berlin52.tsp";
+            let path = prompt_input(&format!("Ruta del archivo [{}]: ", default_path));
+            let path = if path.is_empty() { default_path } else { &path };
+
+            match TspInstance::from_file(path) {
+                Ok(inst) => inst,
+                Err(e) => {
+                    eprintln!("Error cargando {}: {}", path, e);
+                    return;
+                }
+            }
+        }
+        "2" | "3" => {
+            let num_str = prompt_input("Número de ciudades: ");
+            let num_cities: usize = match num_str.parse() {
+                Ok(n) if n > 0 => n,
+                _ => {
+                    eprintln!("Número inválido");
+                    return;
+                }
+            };
+
+            let width_str = prompt_input("Ancho del área [1000]: ");
+            let width: f32 = if width_str.is_empty() {
+                1000.0
+            } else {
+                width_str.parse().unwrap_or(1000.0)
+            };
+
+            let height_str = prompt_input("Alto del área [1000]: ");
+            let height: f32 = if height_str.is_empty() {
+                1000.0
+            } else {
+                height_str.parse().unwrap_or(1000.0)
+            };
+
+            if choice == "3" {
+                generate_cluster_instance(num_cities, width, height)
+            } else {
+                generate_random_instance(num_cities, width, height)
+            }
+        }
+        _ => {
+            eprintln!("Opción inválida");
             return;
         }
     };
 
-    println!("Instancia: {} ({} nodos)", instance.name, instance.dimension);
+    println!("\nInstancia: {} ({} nodos)", instance.name, instance.dimension);
 
     let params = V86Params {
         k_neighbors: 8,
@@ -130,7 +244,7 @@ fn main() {
     let mut strategy = TriangleInsertionV86::with_params(params);
     let mut path = Vec::new();
     let mut steps = Vec::new();
-    let mut opt_steps = Vec::new();
+    let opt_steps = Vec::new();
     let mut step_num = 0;
 
     println!("Ejecutando V8.6 y registrando pasos...\n");
@@ -197,15 +311,32 @@ fn main() {
     println!("Capturados {} pasos de inserción", steps.len());
 
     let final_distance = traveler::core::path_distance(&path, &instance.nodes);
-    let optimal = 7542.0;
-    let error = ((final_distance - optimal) / optimal) * 100.0;
 
-    println!("Distancia final: {:.2}", final_distance);
-    println!("Óptimo: {:.2}", optimal);
-    println!("Error: {:.2}%\n", error);
+    let known_optimal: Option<f32> = match instance.name.as_str() {
+        "berlin52" => Some(7542.0),
+        "eil51" => Some(426.0),
+        "st70" => Some(675.0),
+        "kroA100" => Some(21282.0),
+        "eil76" => Some(538.0),
+        "ch130" => Some(6110.0),
+        "pr76" => Some(108159.0),
+        _ => None,
+    };
+
+    println!("Distancia V8.6: {:.2}", final_distance);
+    if let Some(lkh_dist) = lkh_distance {
+        println!("Distancia LKH:  {:.2}", lkh_dist);
+    }
+    if let Some(opt) = known_optimal {
+        println!("Óptimo conocido: {:.2}", opt);
+        println!("Error vs óptimo: {:.2}%", ((final_distance - opt) / opt) * 100.0);
+    } else if let Some(lkh_dist) = lkh_distance {
+        println!("Error vs LKH: {:.2}%", ((final_distance - lkh_dist) / lkh_dist) * 100.0);
+    }
+    println!();
 
     let html_path = "v86_visualization.html";
-    generate_html(&instance, &steps, &opt_steps, params, html_path, final_distance, optimal, lkh_tour.as_deref(), lkh_distance);
+    generate_html(&instance, &steps, &opt_steps, params, html_path, final_distance, known_optimal, lkh_tour.as_deref(), lkh_distance);
 
     println!("Visualización generada: {}", html_path);
     println!("Abre el archivo en tu navegador.");
@@ -215,10 +346,10 @@ fn generate_html(
     instance: &TspInstance,
     steps: &[InsertionStep],
     opt_steps: &[OptimizationStep],
-    params: V86Params,
+    _params: V86Params,
     output_path: &str,
     final_distance: f32,
-    optimal: f32,
+    known_optimal: Option<f32>,
     lkh_tour: Option<&[usize]>,
     lkh_distance: Option<f32>,
 ) {
@@ -278,15 +409,27 @@ fn generate_html(
     writeln!(file, "                <div class='stat-label'>V8.6 Distance</div>").unwrap();
     writeln!(file, "                <div class='stat-value'>{:.0}</div>", final_distance).unwrap();
     writeln!(file, "            </div>").unwrap();
-    writeln!(file, "            <div class='stat'>").unwrap();
-    writeln!(file, "                <div class='stat-label'>Optimal</div>").unwrap();
-    writeln!(file, "                <div class='stat-value'>{:.0}</div>", optimal).unwrap();
-    writeln!(file, "            </div>").unwrap();
-    writeln!(file, "            <div class='stat'>").unwrap();
-    writeln!(file, "                <div class='stat-label'>Error</div>").unwrap();
-    let error_class = if final_distance <= optimal * 1.05 { "good" } else { "error" };
-    writeln!(file, "                <div class='stat-value {}'>{:.2}%</div>", error_class, ((final_distance - optimal) / optimal) * 100.0).unwrap();
-    writeln!(file, "            </div>").unwrap();
+    if let Some(opt) = known_optimal {
+        writeln!(file, "            <div class='stat'>").unwrap();
+        writeln!(file, "                <div class='stat-label'>Optimal</div>").unwrap();
+        writeln!(file, "                <div class='stat-value'>{:.0}</div>", opt).unwrap();
+        writeln!(file, "            </div>").unwrap();
+        let error_class = if final_distance <= opt * 1.05 { "good" } else { "error" };
+        writeln!(file, "            <div class='stat'>").unwrap();
+        writeln!(file, "                <div class='stat-label'>Error</div>").unwrap();
+        writeln!(file, "                <div class='stat-value {}'>{:.2}%</div>", error_class, ((final_distance - opt) / opt) * 100.0).unwrap();
+        writeln!(file, "            </div>").unwrap();
+    } else if let Some(lkh_dist) = lkh_distance {
+        writeln!(file, "            <div class='stat'>").unwrap();
+        writeln!(file, "                <div class='stat-label'>LKH</div>").unwrap();
+        writeln!(file, "                <div class='stat-value'>{:.0}</div>", lkh_dist).unwrap();
+        writeln!(file, "            </div>").unwrap();
+        let error_class = if final_distance <= lkh_dist * 1.05 { "good" } else { "error" };
+        writeln!(file, "            <div class='stat'>").unwrap();
+        writeln!(file, "                <div class='stat-label'>Error vs LKH</div>").unwrap();
+        writeln!(file, "                <div class='stat-value {}'>{:.2}%</div>", error_class, ((final_distance - lkh_dist) / lkh_dist) * 100.0).unwrap();
+        writeln!(file, "            </div>").unwrap();
+    }
     writeln!(file, "        </div>").unwrap();
     writeln!(file, "    </div>").unwrap();
 
@@ -330,10 +473,15 @@ fn generate_html(
     if let Some(lkh_dist) = lkh_distance {
         writeln!(file, "                <div class='metric'><span class='metric-label'>LKH:</span><span class='metric-value'>{:.0}</span></div>", lkh_dist).unwrap();
     }
-    writeln!(file, "                <div class='metric'><span class='metric-label'>Óptimo:</span><span class='metric-value'>{:.0}</span></div>", optimal).unwrap();
-    writeln!(file, "                <div class='metric'><span class='metric-label'>Error V8.6:</span><span class='metric-value error'>+{:.0} ({:.1}%)</span></div>", final_distance - optimal, ((final_distance - optimal) / optimal) * 100.0).unwrap();
-    if let Some(lkh_dist) = lkh_distance {
-        writeln!(file, "                <div class='metric'><span class='metric-label'>Error LKH:</span><span class='metric-value'>+{:.0} ({:.2}%)</span></div>", lkh_dist - optimal, ((lkh_dist - optimal) / optimal) * 100.0).unwrap();
+    if let Some(opt) = known_optimal {
+        writeln!(file, "                <div class='metric'><span class='metric-label'>Óptimo:</span><span class='metric-value'>{:.0}</span></div>", opt).unwrap();
+        writeln!(file, "                <div class='metric'><span class='metric-label'>Error V8.6:</span><span class='metric-value error'>+{:.0} ({:.1}%)</span></div>", final_distance - opt, ((final_distance - opt) / opt) * 100.0).unwrap();
+        if let Some(lkh_dist) = lkh_distance {
+            writeln!(file, "                <div class='metric'><span class='metric-label'>Error LKH:</span><span class='metric-value'>+{:.0} ({:.2}%)</span></div>", lkh_dist - opt, ((lkh_dist - opt) / opt) * 100.0).unwrap();
+        }
+    } else if let Some(lkh_dist) = lkh_distance {
+        writeln!(file, "                <div class='metric'><span class='metric-label'>Referencia:</span><span class='metric-value'>LKH</span></div>").unwrap();
+        writeln!(file, "                <div class='metric'><span class='metric-label'>Error V8.6 vs LKH:</span><span class='metric-value error'>+{:.0} ({:.1}%)</span></div>", final_distance - lkh_dist, ((final_distance - lkh_dist) / lkh_dist) * 100.0).unwrap();
     }
     writeln!(file, "            </div>").unwrap();
 
@@ -355,7 +503,7 @@ fn generate_html(
 
     // Datos de nodos
     writeln!(file, "        const nodes = [").unwrap();
-    for (i, node) in instance.nodes.iter().enumerate() {
+    for node in instance.nodes.iter() {
         writeln!(file, "            {{ x: {:.2}, y: {:.2} }},", node.pos.x, node.pos.y).unwrap();
     }
     writeln!(file, "        ];").unwrap();
@@ -407,7 +555,11 @@ fn generate_html(
     }
     writeln!(file, "        ];").unwrap();
 
-    writeln!(file, "        const optimalDistance = {:.2};", optimal).unwrap();
+    if let Some(opt) = known_optimal {
+        writeln!(file, "        const optimalDistance = {:.2};", opt).unwrap();
+    } else {
+        writeln!(file, "        const optimalDistance = null;").unwrap();
+    }
     writeln!(file, "        const v86Distance = {:.2};", final_distance).unwrap();
 
     writeln!(file, "        let currentStep = 0;").unwrap();
